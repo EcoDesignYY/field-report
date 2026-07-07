@@ -14,7 +14,7 @@
 
 const CONFIG = {
   // GAS WebアプリURL
-  GAS_POST_URL: 'https://script.google.com/macros/s/ここにデプロイID/exec',
+  GAS_POST_URL: 'https://script.google.com/a/macros/ecodesign-labo.jp/s/AKfycbzyU4I8u5csBb7qRIWvSGwPBrDcYAv0p6rPO6-ModBzPCtwavFeeSaGcOf-TwJeyb7BfQ/exec',
 
   MAX_RECORDING_SECONDS: 60,
   IMAGE_MAX_WIDTH: 1280,
