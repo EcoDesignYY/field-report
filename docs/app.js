@@ -597,7 +597,8 @@ function getSupportedAudioMimeType() {
   const candidates = [
     'audio/webm;codecs=opus',
     'audio/webm',
-    'audio/mp4'
+    'audio/mp4',
+    'audio/aac'
   ];
 
   for (const type of candidates) {
