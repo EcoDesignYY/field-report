@@ -235,22 +235,40 @@ function clearImage() {
 async function startRecording() {
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('このブラウザは録音に対応していません。');
+      throw new Error('このブラウザはマイク取得に対応していません。');
+    }
+
+    if (!window.MediaRecorder) {
+      throw new Error('このブラウザは録音機能 MediaRecorder に対応していません。');
     }
 
     clearAudio();
 
-    audioStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true
-      },
-      video: false
-    });
+    // スマホ安定性優先：まずは最小制約で取得する
+    try {
+      audioStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false
+      });
+    } catch (firstError) {
+      // 一部ブラウザ向けに制約付きで再試行
+      audioStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: { ideal: true },
+          noiseSuppression: { ideal: true },
+          autoGainControl: { ideal: true }
+        },
+        video: false
+      });
+    }
 
     const mimeType = getSupportedAudioMimeType();
 
-    mediaRecorder = new MediaRecorder(audioStream, mimeType ? { mimeType } : undefined);
+    if (!mimeType) {
+      throw new Error('このブラウザで利用可能な録音形式が見つかりません。');
+    }
+
+    mediaRecorder = new MediaRecorder(audioStream, { mimeType });
     audioChunks = [];
 
     mediaRecorder.addEventListener('dataavailable', (event) => {
@@ -260,10 +278,14 @@ async function startRecording() {
     });
 
     mediaRecorder.addEventListener('stop', () => {
-      const type = mimeType || 'audio/webm';
-      audioBlob = new Blob(audioChunks, { type });
+      audioBlob = new Blob(audioChunks, { type: mimeType });
 
       els.audioPlayer.src = URL.createObjectURL(audioBlob);
+
+      if (els.audioPreviewArea) {
+        els.audioPreviewArea.classList.remove('hidden');
+      }
+
       els.clearAudioButton.disabled = false;
 
       cleanupRecordingStream();
@@ -293,7 +315,26 @@ async function startRecording() {
 
   } catch (error) {
     cleanupRecordingStream();
-    setStatus(`録音開始エラー: ${error.message}`, 'error');
+    stopRecordingTimer();
+
+    els.startRecordingButton.disabled = false;
+    els.stopRecordingButton.disabled = true;
+
+    setStatus(
+      `録音を開始できませんでした。\n\n` +
+      `原因候補:\n` +
+      `・このサイトのマイク権限が拒否されている\n` +
+      `・Chrome/Safari以外のアプリ内ブラウザで開いている\n` +
+      `・端末側でマイク使用が制限されている\n` +
+      `・ブラウザが現在のページで録音を許可していない\n\n` +
+      `対処:\n` +
+      `・ChromeまたはSafariで直接開いてください\n` +
+      `・ecodesignyy.github.io のマイク権限を許可してください\n` +
+      `・一度ブラウザを完全終了して再度GAS入口から開いてください\n` +
+      `・録音できない場合は「音声ファイルを選択」で代替してください\n\n` +
+      `詳細: ${error.message}`,
+      'error'
+    );
   }
 }
 
