@@ -154,8 +154,28 @@ button.primary {
 }
 
 .audio {
+  display: block;
   width: 100%;
-  margin-top: 10px;
+  max-width: 100%;
+  height: 56px;
+  min-height: 56px;
+  margin-top: 12px;
+  overflow: visible;
+}
+
+.audio::-webkit-media-controls-panel {
+  width: 100%;
+}
+
+.card,
+.audio-preview {
+  overflow: visible;
+}
+
+.audio-preview {
+  margin-top: 12px;
+  min-height: 72px;
+  padding-bottom: 8px;
 }
 
 .recording-info {
