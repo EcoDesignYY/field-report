@@ -1,128 +1,612 @@
-<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>撮影・添付 | 現場問題提起</title>
-  <link rel="stylesheet" href="./capture.css?v=camera-large-001">
-</head>
-<body>
-  <main class="screen">
-    <header class="top-bar">
-      <button id="backButton" class="icon-button" type="button" aria-label="戻る">
-        ‹
-      </button>
-      <h1>撮影・添付</h1>
-      <button id="helpButton" class="help-button" type="button" aria-label="ヘルプ">
-        ?
-      </button>
-    </header>
+:root {
+  --navy: #0f2b4f;
+  --navy-dark: #0a1f3a;
+  --teal: #009688;
+  --teal-dark: #00796b;
+  --teal-soft: #dff5f1;
+  --bg: #f3f7f9;
+  --card: #ffffff;
+  --text: #111827;
+  --muted: #64748b;
+  --border: #d7dee8;
+  --shadow: 0 4px 14px rgba(15, 43, 79, 0.08);
+  --danger: #b91c1c;
+}
 
-    <section class="content">
-      <p class="lead">現場の状況を写真で記録</p>
+* {
+  box-sizing: border-box;
+}
 
-      <div id="cameraStatusChip" class="status-chip">
-        <span class="chip-icon">📷</span>
-        <span id="cameraStatusText">カメラ準備中</span>
-      </div>
+html {
+  -webkit-text-size-adjust: 100%;
+}
 
-      <section class="preview-card">
-        <div id="cameraOverlay" class="camera-overlay hidden">
-          <button id="gridToggleButton" class="top-badge right" type="button">
-            ▦ グリッド OFF
-          </button>
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
 
-          <div id="gridOverlay" class="grid-overlay hidden"></div>
+button,
+textarea,
+label,
+input {
+  font-family: inherit;
+}
 
-          <div id="zoomControl" class="zoom-control hidden">
-            <div class="zoom-head">
-              <span>倍率</span>
-              <strong id="zoomValueText">1.0x</strong>
-            </div>
-            <input
-              id="zoomRange"
-              class="zoom-range"
-              type="range"
-              min="1"
-              max="1"
-              step="0.1"
-              value="1"
-            >
-          </div>
-        </div>
+.screen {
+  min-height: 100vh;
+  padding-bottom: calc(118px + env(safe-area-inset-bottom));
+}
 
-        <video id="cameraVideo" class="camera-video" autoplay playsinline muted></video>
+.top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: 64px;
+  padding: 0 16px;
+  background: linear-gradient(135deg, var(--navy-dark), var(--navy));
+  color: #fff;
+  display: grid;
+  grid-template-columns: 48px 1fr 48px;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(15, 43, 79, 0.18);
+}
 
-        <div id="emptyPreview" class="empty-preview">
-          <div class="empty-icon">📷</div>
-          <div class="empty-title">画像未選択</div>
-          <div class="empty-text">カメラで撮影するか、画像を選択してください</div>
-        </div>
+.top-bar h1 {
+  margin: 0;
+  text-align: center;
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 800;
+}
 
-        <img id="imagePreview" class="image-preview hidden" alt="画像プレビュー">
+.icon-button,
+.help-button {
+  border: none;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
 
-        <canvas id="captureCanvas" class="hidden"></canvas>
-      </section>
+.icon-button {
+  font-size: 42px;
+  line-height: 1;
+  padding: 0;
+  text-align: left;
+}
 
-      <div class="guide-text">
-        ⓘ 対象が全体的に写るように撮影してください
-      </div>
+.help-button {
+  width: 36px;
+  height: 36px;
+  justify-self: end;
+  border: 2px solid rgba(255, 255, 255, 0.82);
+  border-radius: 999px;
+  font-size: 22px;
+  font-weight: 800;
+}
 
-      <section class="capture-controls">
-        <button id="retakeButton" class="side-button" type="button" disabled>
-          ↻ 撮り直し
-        </button>
+.content {
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 18px 12px 0;
+}
 
-        <button id="shutterButton" class="shutter-button" type="button">
-          <span>📷</span>
-        </button>
+.lead {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: 21px;
+  font-weight: 900;
+  color: #334155;
+}
 
-        <label class="side-button file-side-button" for="imageFileInput">
-          🖼 画像を選択
-        </label>
-        <input id="imageFileInput" class="file-input" type="file" accept="image/*" capture="environment">
-      </section>
+.status-chip {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 14px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 17px;
+}
 
-      <section class="memo-card">
-        <div class="memo-head">
-          <div>
-            <h2>画像メモ</h2>
-            <p>不具合箇所や気になる点を補足できます</p>
-          </div>
-          <span class="memo-icon">✎</span>
-        </div>
+.status-chip.error {
+  background: #fee2e2;
+  color: var(--danger);
+}
 
-        <textarea
-          id="imageMemoInput"
-          class="memo-input"
-          placeholder="例：右側ベルト端部の摩耗が気になる"
-        ></textarea>
-      </section>
+.status-chip.active {
+  background: #e0f2fe;
+  color: #0369a1;
+}
 
-      <section class="mode-card">
-        <button id="cameraModeButton" class="mode-button active" type="button">
-          📷 撮影
-        </button>
-        <label class="mode-button" for="imageFileInput2">
-          📎 添付
-        </label>
-        <input id="imageFileInput2" class="file-input" type="file" accept="image/*">
-      </section>
+.preview-card {
+  position: relative;
+  width: 100%;
+  height: min(56vh, 460px);
+  min-height: 360px;
+  border-radius: 22px;
+  overflow: hidden;
+  background: #e5edf3;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
 
-      <div id="statusBox" class="status-box hidden"></div>
-    </section>
+.camera-video,
+.image-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #000;
+}
 
-    <footer class="bottom-actions">
-      <button id="nextButton" class="primary-button" type="button" disabled>
-        <span class="arrow">➜</span>
-        この画像で次へ
-      </button>
-      <button id="skipButton" class="text-button" type="button">
-        あとで追加
-      </button>
-    </footer>
-  </main>
+.camera-video {
+  display: none;
+}
 
-  <script src="./capture.js?v=camera-large-001"></script>
-</body>
-</html>
+.camera-video.active {
+  display: block;
+}
+
+.image-preview {
+  background: #f8fafc;
+}
+
+.empty-preview {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: var(--muted);
+  padding: 24px;
+}
+
+.empty-icon {
+  font-size: 52px;
+  margin-bottom: 10px;
+}
+
+.empty-title {
+  font-weight: 900;
+  font-size: 22px;
+  color: #334155;
+}
+
+.empty-text {
+  margin-top: 8px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.camera-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.top-badge {
+  position: absolute;
+  padding: 9px 13px;
+  border-radius: 999px;
+  background: rgba(15, 43, 79, 0.78);
+  color: #fff;
+  font-weight: 900;
+  font-size: 15px;
+  backdrop-filter: blur(8px);
+  border: none;
+  pointer-events: auto;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.top-badge.right {
+  top: 12px;
+  right: 12px;
+}
+
+.grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to right, transparent 33.2%, rgba(255, 255, 255, 0.65) 33.2%, rgba(255, 255, 255, 0.65) 33.6%, transparent 33.6%),
+    linear-gradient(to right, transparent 66.4%, rgba(255, 255, 255, 0.65) 66.4%, rgba(255, 255, 255, 0.65) 66.8%, transparent 66.8%),
+    linear-gradient(to bottom, transparent 33.2%, rgba(255, 255, 255, 0.65) 33.2%, rgba(255, 255, 255, 0.65) 33.6%, transparent 33.6%),
+    linear-gradient(to bottom, transparent 66.4%, rgba(255, 255, 255, 0.65) 66.4%, rgba(255, 255, 255, 0.65) 66.8%, transparent 66.8%);
+}
+
+.zoom-control {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  padding: 12px 14px 14px;
+  border-radius: 18px;
+  background: rgba(15, 43, 79, 0.84);
+  color: #fff;
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+.zoom-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.zoom-head strong {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.zoom-range {
+  width: 100%;
+  height: 30px;
+  margin: 0;
+  background: transparent;
+  accent-color: var(--teal);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.zoom-range::-webkit-slider-runnable-track {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.zoom-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  margin-top: -10.5px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--teal);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.zoom-range::-moz-range-track {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.zoom-range::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--teal);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.guide-text {
+  margin: 12px 0 14px;
+  text-align: center;
+  color: #475569;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.capture-controls {
+  display: grid;
+  grid-template-columns: 1fr 104px 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.side-button {
+  min-height: 58px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--navy);
+  font-size: 16px;
+  font-weight: 900;
+  box-shadow: var(--shadow);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  cursor: pointer;
+  padding: 0 10px;
+  text-decoration: none;
+}
+
+.side-button:disabled {
+  color: #94a3b8;
+  background: #f1f5f9;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.file-side-button {
+  text-decoration: none;
+}
+
+.shutter-button {
+  width: 104px;
+  height: 104px;
+  border: none;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at center, var(--teal) 0 55%, #fff 56% 68%, var(--teal-soft) 69% 100%);
+  color: #fff;
+  font-size: 36px;
+  box-shadow: 0 6px 20px rgba(0, 150, 136, 0.25);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.shutter-button:active {
+  transform: scale(0.97);
+}
+
+.memo-card,
+.mode-card {
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.memo-card {
+  padding: 16px;
+}
+
+.memo-head {
+  display: grid;
+  grid-template-columns: 1fr 32px;
+  gap: 8px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.memo-head h2 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--navy-dark);
+}
+
+.memo-head p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.memo-icon {
+  color: #64748b;
+  font-size: 24px;
+  text-align: right;
+}
+
+.memo-input {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 13px;
+  font-size: 17px;
+  line-height: 1.5;
+  background: #fbfdff;
+}
+
+.mode-card {
+  padding: 5px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.mode-button {
+  min-height: 52px;
+  border: none;
+  border-radius: 15px;
+  background: #fff;
+  color: var(--navy);
+  font-size: 17px;
+  font-weight: 900;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  cursor: pointer;
+}
+
+.mode-button.active {
+  border: 2px solid var(--teal);
+  color: var(--teal-dark);
+  background: #f0fdfa;
+}
+
+.file-input {
+  display: none;
+}
+
+.status-box {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.status-box.ok {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #166534;
+}
+
+.status-box.error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: var(--danger);
+}
+
+.bottom-actions {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  background: rgba(243, 247, 249, 0.96);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(215, 222, 232, 0.92);
+  z-index: 30;
+}
+
+.primary-button {
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
+  min-height: 58px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--teal-dark), var(--teal));
+  color: #fff;
+  font-size: 20px;
+  font-weight: 900;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 18px rgba(0, 150, 136, 0.25);
+  cursor: pointer;
+}
+
+.primary-button:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--teal-dark);
+  font-size: 18px;
+}
+
+.text-button {
+  display: block;
+  width: fit-content;
+  margin: 10px auto 0;
+  border: none;
+  background: transparent;
+  color: var(--navy);
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (max-width: 380px) {
+  .content {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .lead {
+    font-size: 19px;
+  }
+
+  .status-chip {
+    font-size: 15px;
+    padding: 8px 16px;
+    margin-bottom: 12px;
+  }
+
+  .preview-card {
+    height: min(54vh, 420px);
+    min-height: 330px;
+    border-radius: 20px;
+  }
+
+  .capture-controls {
+    grid-template-columns: 1fr 94px 1fr;
+    gap: 8px;
+  }
+
+  .shutter-button {
+    width: 94px;
+    height: 94px;
+    font-size: 32px;
+  }
+
+  .side-button {
+    min-height: 54px;
+    font-size: 14px;
+    padding: 0 8px;
+  }
+
+  .top-badge {
+    font-size: 13px;
+    padding: 7px 10px;
+  }
+
+  .zoom-control {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    padding: 9px 10px 11px;
+  }
+
+  .zoom-head {
+    font-size: 13px;
+  }
+
+  .zoom-head strong {
+    font-size: 15px;
+  }
+
+  .memo-head h2 {
+    font-size: 18px;
+  }
+
+  .memo-head p {
+    font-size: 14px;
+  }
+
+  .memo-input {
+    font-size: 16px;
+  }
+
+  .primary-button {
+    min-height: 56px;
+    font-size: 18px;
+  }
+}
