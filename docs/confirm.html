@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>投稿確認 | 現場問題提起</title>
+  <link rel="stylesheet" href="./confirm.css?v=drive-upload-001">
+</head>
+<body>
+  <main class="screen">
+    <header class="top-bar">
+      <button id="backButton" class="icon-button" type="button" aria-label="戻る">
+        ‹
+      </button>
+      <h1>投稿確認</h1>
+      <button id="helpButton" class="help-button" type="button" aria-label="ヘルプ">
+        ?
+      </button>
+    </header>
+
+    <section class="content">
+      <p class="lead">内容を確認してDriveへ保存</p>
+
+      <section class="form-card">
+        <label class="field-label" for="titleInput">件名 <span>必須</span></label>
+        <input
+          id="titleInput"
+          class="text-input"
+          type="text"
+          placeholder="例：第二ライン搬送装置の異音"
+          maxlength="80"
+        >
+
+        <label class="field-label" for="departmentSelect">対象部署 <span>必須</span></label>
+        <select id="departmentSelect" class="select-input">
+          <option value="">選択してください</option>
+          <option value="maintenance">保全部</option>
+          <option value="quality">品質管理部</option>
+          <option value="production">製造部</option>
+          <option value="design">設計部</option>
+          <option value="general_affairs">総務部</option>
+        </select>
+      </section>
+
+      <section class="summary-card">
+        <div class="summary-head">
+          <h2>録音データ</h2>
+          <span id="audioStatusBadge" class="badge gray">確認中</span>
+        </div>
+
+        <div id="audioSummary" class="summary-text">録音データを確認しています。</div>
+
+        <div id="audioPreviewArea" class="audio-preview hidden">
+          <button id="playAudioButton" class="small-button" type="button">再生</button>
+          <span id="audioPlayStatus">録音済み</span>
+          <audio id="audioPlayer" preload="metadata"></audio>
+        </div>
+      </section>
+
+      <section class="summary-card">
+        <div class="summary-head">
+          <h2>画像データ</h2>
+          <span id="imageStatusBadge" class="badge gray">確認中</span>
+        </div>
+
+        <div id="imageSummary" class="summary-text">画像データを確認しています。</div>
+
+        <img id="imagePreview" class="image-preview hidden" alt="投稿画像プレビュー">
+      </section>
+
+      <section class="summary-card">
+        <div class="summary-head">
+          <h2>投稿メモ</h2>
+        </div>
+
+        <div class="memo-block">
+          <h3>録音メモ</h3>
+          <p id="audioMemoText">なし</p>
+        </div>
+
+        <div class="memo-block">
+          <h3>画像メモ</h3>
+          <p id="imageMemoText">なし</p>
+        </div>
+      </section>
+
+      <section class="drive-card">
+        <div>
+          <h2>Google Drive接続</h2>
+          <p id="driveAuthText">未接続です。投稿前にDriveへの保存を許可してください。</p>
+        </div>
+        <button id="authorizeButton" class="secondary-button" type="button">
+          Driveへ接続
+        </button>
+      </section>
+
+      <div id="statusBox" class="status-box hidden"></div>
+
+      <section id="resultCard" class="result-card hidden">
+        <h2>保存完了</h2>
+        <p>投稿データをGoogle Driveへ保存しました。</p>
+        <a id="folderLink" class="folder-link" href="#" target="_blank" rel="noopener">
+          投稿フォルダを開く
+        </a>
+      </section>
+    </section>
+
+    <footer class="bottom-actions">
+      <button id="uploadButton" class="primary-button" type="button" disabled>
+        <span class="arrow">➜</span>
+        Driveへ保存
+      </button>
+      <button id="backToCaptureButton" class="text-button" type="button">
+        撮影画面へ戻る
+      </button>
+    </footer>
+  </main>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="./confirm.js?v=drive-upload-001"></script>
+</body>
+</html>
