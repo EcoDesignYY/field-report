@@ -1,13 +1,14 @@
 'use strict';
 
 /**
- * 撮影・添付画面 v0.3
+ * 撮影・添付画面 v0.4
  *
  * 変更点:
+ * - カメラプレビューを大きく見せるレイアウトに変更
+ * - 通常時のステータス欄を非表示化
  * - グリッドON/OFF
- * - 倍率変更つまみを追加
+ * - 倍率変更つまみ
  * - ズーム対応端末のみ倍率UIを表示
- * - 非対応端末では倍率UIを非表示
  *
  * この画面ではDrive保存・GAS送信は行わない。
  */
@@ -111,7 +112,7 @@ async function init() {
 
     if (!state.imageBlob) {
       setCameraStatus('カメラ準備完了', 'ready');
-      setStatus(getRecommendedBrowserMessage(), 'ok');
+      setStatus('', '');
     }
 
   } catch (error) {
@@ -207,7 +208,7 @@ async function startCamera() {
     els.nextButton.disabled = true;
 
     setCameraStatus('カメラ起動中', 'active');
-    setStatus('カメラを起動しました。中央のボタンで撮影してください。', 'ok');
+    setStatus('', '');
 
   } catch (error) {
     stopCamera();
@@ -272,7 +273,7 @@ function captureImage() {
     els.nextButton.disabled = false;
 
     setCameraStatus('画像選択済み', 'ready');
-    setStatus('画像を撮影しました。必要に応じて画像メモを入力してください。', 'ok');
+    setStatus('', '');
 
   }, 'image/jpeg', CONFIG.IMAGE_JPEG_QUALITY);
 }
@@ -308,7 +309,7 @@ async function handleImageFileChange(event) {
     els.nextButton.disabled = false;
 
     setCameraStatus('画像選択済み', 'ready');
-    setStatus('画像を選択しました。必要に応じて画像メモを入力してください。', 'ok');
+    setStatus('', '');
 
   } catch (error) {
     setStatus(`画像処理エラー: ${error.message}`, 'error');
@@ -752,8 +753,15 @@ function setCameraStatus(text, mode) {
 }
 
 function setStatus(message, type) {
+  if (!message) {
+    els.statusBox.textContent = '';
+    els.statusBox.classList.add('hidden');
+    els.statusBox.classList.remove('ok', 'error');
+    return;
+  }
+
   els.statusBox.textContent = message;
-  els.statusBox.classList.remove('ok', 'error');
+  els.statusBox.classList.remove('hidden', 'ok', 'error');
 
   if (type === 'ok') {
     els.statusBox.classList.add('ok');
@@ -773,16 +781,6 @@ function disableControls() {
   els.imageFileInput2.disabled = true;
   els.gridToggleButton.disabled = true;
   els.zoomRange.disabled = true;
-}
-
-function getRecommendedBrowserMessage() {
-  const ua = navigator.userAgent || '';
-
-  if (/iPhone|iPad|iPod/.test(ua) && /CriOS/.test(ua)) {
-    return 'iPhoneのChromeではカメラ・録音が不安定な場合があります。\nSafariでの利用を推奨します。';
-  }
-
-  return '撮影準備ができました。中央のボタンでカメラを起動できます。';
 }
 
 function formatDateForFile(date) {
