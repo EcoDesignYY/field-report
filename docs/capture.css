@@ -30,7 +30,8 @@ body {
 
 button,
 textarea,
-label {
+label,
+input {
   font-family: inherit;
 }
 
@@ -193,8 +194,7 @@ label {
   pointer-events: none;
 }
 
-.top-badge,
-.zoom-badge {
+.top-badge {
   position: absolute;
   padding: 8px 12px;
   border-radius: 999px;
@@ -203,9 +203,6 @@ label {
   font-weight: 800;
   font-size: 14px;
   backdrop-filter: blur(8px);
-}
-
-.top-badge {
   border: none;
   pointer-events: auto;
   cursor: pointer;
@@ -217,12 +214,6 @@ label {
   right: 12px;
 }
 
-.zoom-badge {
-  left: 50%;
-  bottom: 12px;
-  transform: translateX(-50%);
-}
-
 .grid-overlay {
   position: absolute;
   inset: 0;
@@ -232,6 +223,75 @@ label {
     linear-gradient(to right, transparent 66.4%, rgba(255, 255, 255, 0.65) 66.4%, rgba(255, 255, 255, 0.65) 66.8%, transparent 66.8%),
     linear-gradient(to bottom, transparent 33.2%, rgba(255, 255, 255, 0.65) 33.2%, rgba(255, 255, 255, 0.65) 33.6%, transparent 33.6%),
     linear-gradient(to bottom, transparent 66.4%, rgba(255, 255, 255, 0.65) 66.4%, rgba(255, 255, 255, 0.65) 66.8%, transparent 66.8%);
+}
+
+.zoom-control {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  padding: 10px 12px 12px;
+  border-radius: 16px;
+  background: rgba(15, 43, 79, 0.82);
+  color: #fff;
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+.zoom-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.zoom-head strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.zoom-range {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+
+.zoom-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.zoom-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -9px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--teal);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.zoom-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.zoom-range::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--teal);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 .guide-text {
@@ -491,9 +551,15 @@ label {
     padding: 0 8px;
   }
 
-  .top-badge,
-  .zoom-badge {
+  .top-badge {
     font-size: 13px;
     padding: 7px 10px;
+  }
+
+  .zoom-control {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    padding: 9px 10px 11px;
   }
 }
