@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>撮影・添付 | 現場問題提起</title>
+  <link rel="stylesheet" href="./capture.css">
+</head>
+<body>
+  <main class="screen">
+    <header class="top-bar">
+      <button id="backButton" class="icon-button" type="button" aria-label="戻る">
+        ‹
+      </button>
+      <h1>撮影・添付</h1>
+      <button id="helpButton" class="help-button" type="button" aria-label="ヘルプ">
+        ?
+      </button>
+    </header>
+
+    <section class="content">
+      <p class="lead">現場の状況を写真で記録</p>
+
+      <div id="cameraStatusChip" class="status-chip">
+        <span class="chip-icon">📷</span>
+        <span id="cameraStatusText">カメラ準備中</span>
+      </div>
+
+      <section class="preview-card">
+        <div id="cameraOverlay" class="camera-overlay hidden">
+          <div class="top-badge left">⚡ 自動</div>
+          <div class="top-badge right">▦ グリッド</div>
+          <div class="zoom-badge">1.0x</div>
+        </div>
+
+        <video id="cameraVideo" class="camera-video" autoplay playsinline muted></video>
+
+        <div id="emptyPreview" class="empty-preview">
+          <div class="empty-icon">📷</div>
+          <div class="empty-title">画像未選択</div>
+          <div class="empty-text">カメラで撮影するか、画像を選択してください</div>
+        </div>
+
+        <img id="imagePreview" class="image-preview hidden" alt="画像プレビュー">
+
+        <canvas id="captureCanvas" class="hidden"></canvas>
+      </section>
+
+      <div class="guide-text">
+        ⓘ 対象が全体的に写るように撮影してください
+      </div>
+
+      <section class="capture-controls">
+        <button id="retakeButton" class="side-button" type="button" disabled>
+          ↻ 撮り直し
+        </button>
+
+        <button id="shutterButton" class="shutter-button" type="button">
+          <span>📷</span>
+        </button>
+
+        <label class="side-button file-side-button" for="imageFileInput">
+          🖼 画像を選択
+        </label>
+        <input id="imageFileInput" class="file-input" type="file" accept="image/*" capture="environment">
+      </section>
+
+      <section class="memo-card">
+        <div class="memo-head">
+          <div>
+            <h2>画像メモ</h2>
+            <p>不具合箇所や気になる点を補足できます</p>
+          </div>
+          <span class="memo-icon">✎</span>
+        </div>
+
+        <textarea
+          id="imageMemoInput"
+          class="memo-input"
+          placeholder="例：右側ベルト端部の摩耗が気になる"
+        ></textarea>
+      </section>
+
+      <section class="mode-card">
+        <button id="cameraModeButton" class="mode-button active" type="button">
+          📷 撮影
+        </button>
+        <label class="mode-button" for="imageFileInput2">
+          📎 添付
+        </label>
+        <input id="imageFileInput2" class="file-input" type="file" accept="image/*">
+      </section>
+
+      <div id="statusBox" class="status-box">
+        GAS入口から開いてください。
+      </div>
+    </section>
+
+    <footer class="bottom-actions">
+      <button id="nextButton" class="primary-button" type="button" disabled>
+        <span class="arrow">➜</span>
+        この画像で次へ
+      </button>
+      <button id="skipButton" class="text-button" type="button">
+        あとで追加
+      </button>
+    </footer>
+  </main>
+
+  <script src="./capture.js"></script>
+</body>
+</html>
