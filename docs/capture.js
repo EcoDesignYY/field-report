@@ -1,7 +1,12 @@
 'use strict';
 
 /**
- * 撮影・添付画面 v0.1
+ * 撮影・添付画面 v0.2
+ *
+ * 変更点:
+ * - 見た目だけだった「自動」表示を削除
+ * - グリッドをON/OFFできる実機能に変更
+ * - 倍率表示はカメラがzoom capabilityを持つ場合のみ表示
  *
  * 役割:
  * - token確認
@@ -32,6 +37,10 @@ const els = {
 
   previewCard: document.querySelector('.preview-card'),
   cameraOverlay: document.getElementById('cameraOverlay'),
+  gridToggleButton: document.getElementById('gridToggleButton'),
+  gridOverlay: document.getElementById('gridOverlay'),
+  zoomBadge: document.getElementById('zoomBadge'),
+
   cameraVideo: document.getElementById('cameraVideo'),
   emptyPreview: document.getElementById('emptyPreview'),
   imagePreview: document.getElementById('imagePreview'),
@@ -56,10 +65,14 @@ const els = {
 const state = {
   authToken: '',
   cameraStream: null,
+  cameraTrack: null,
+
   imageBlob: null,
   imageFileName: '',
   imageMimeType: 'image/jpeg',
-  objectUrl: ''
+  objectUrl: '',
+
+  isGridEnabled: false
 };
 
 init();
@@ -113,6 +126,7 @@ function bindEvents() {
       '撮影のコツ:\n' +
       '・対象物が全体的に写る距離で撮影してください。\n' +
       '・不具合箇所が小さい場合は、画像メモで補足してください。\n' +
+      '・グリッドをONにすると構図を合わせやすくなります。\n' +
       '・カメラが使えない場合は「画像を選択」から添付してください。',
       'ok'
     );
@@ -120,6 +134,7 @@ function bindEvents() {
 
   els.shutterButton.addEventListener('click', handleShutterButtonClick);
   els.retakeButton.addEventListener('click', retakeImage);
+  els.gridToggleButton.addEventListener('click', toggleGrid);
 
   els.imageFileInput.addEventListener('change', handleImageFileChange);
   els.imageFileInput2.addEventListener('change', handleImageFileChange);
@@ -167,12 +182,17 @@ async function startCamera() {
       audio: false
     });
 
+    state.cameraTrack = state.cameraStream.getVideoTracks()[0] || null;
+
     els.cameraVideo.srcObject = state.cameraStream;
     els.cameraVideo.classList.add('active');
 
     els.emptyPreview.classList.add('hidden');
     els.imagePreview.classList.add('hidden');
+
     els.cameraOverlay.classList.remove('hidden');
+    renderGridState();
+    setupZoomBadge();
 
     els.shutterButton.innerHTML = '<span>📷</span>';
     els.retakeButton.disabled = true;
@@ -344,9 +364,61 @@ function stopCamera() {
     state.cameraStream = null;
   }
 
+  state.cameraTrack = null;
+
   els.cameraVideo.srcObject = null;
   els.cameraVideo.classList.remove('active');
   els.cameraOverlay.classList.add('hidden');
+  els.zoomBadge.classList.add('hidden');
+}
+
+function toggleGrid() {
+  state.isGridEnabled = !state.isGridEnabled;
+  renderGridState();
+}
+
+function renderGridState() {
+  if (state.isGridEnabled) {
+    els.gridOverlay.classList.remove('hidden');
+    els.gridToggleButton.textContent = '▦ グリッド ON';
+    return;
+  }
+
+  els.gridOverlay.classList.add('hidden');
+  els.gridToggleButton.textContent = '▦ グリッド OFF';
+}
+
+function setupZoomBadge() {
+  try {
+    if (!state.cameraTrack || typeof state.cameraTrack.getCapabilities !== 'function') {
+      els.zoomBadge.classList.add('hidden');
+      return;
+    }
+
+    const capabilities = state.cameraTrack.getCapabilities();
+
+    if (!capabilities || !capabilities.zoom) {
+      els.zoomBadge.classList.add('hidden');
+      return;
+    }
+
+    const settings = typeof state.cameraTrack.getSettings === 'function'
+      ? state.cameraTrack.getSettings()
+      : {};
+
+    const zoom = Number(settings.zoom || capabilities.zoom.min || 1);
+
+    if (!Number.isFinite(zoom)) {
+      els.zoomBadge.classList.add('hidden');
+      return;
+    }
+
+    els.zoomBadge.textContent = `${zoom.toFixed(1)}x`;
+    els.zoomBadge.classList.remove('hidden');
+
+  } catch (_) {
+    els.zoomBadge.classList.add('hidden');
+  }
 }
 
 async function saveAndGoNext() {
@@ -580,6 +652,7 @@ function disableControls() {
   els.skipButton.disabled = true;
   els.imageFileInput.disabled = true;
   els.imageFileInput2.disabled = true;
+  els.gridToggleButton.disabled = true;
 }
 
 function getRecommendedBrowserMessage() {
