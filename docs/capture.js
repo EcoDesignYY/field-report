@@ -1,20 +1,13 @@
 'use strict';
 
 /**
- * 撮影・添付画面 v0.2
+ * 撮影・添付画面 v0.3
  *
  * 変更点:
- * - 見た目だけだった「自動」表示を削除
- * - グリッドをON/OFFできる実機能に変更
- * - 倍率表示はカメラがzoom capabilityを持つ場合のみ表示
- *
- * 役割:
- * - token確認
- * - カメラ撮影
- * - 画像ファイル添付
- * - 画像メモ入力
- * - 画像データをIndexedDBへ保存
- * - 次の投稿確認画面へ遷移
+ * - グリッドON/OFF
+ * - 倍率変更つまみを追加
+ * - ズーム対応端末のみ倍率UIを表示
+ * - 非対応端末では倍率UIを非表示
  *
  * この画面ではDrive保存・GAS送信は行わない。
  */
@@ -25,7 +18,8 @@ const CONFIG = {
   DB_VERSION: 1,
   STORE_NAME: 'draft',
   IMAGE_MAX_WIDTH: 1600,
-  IMAGE_JPEG_QUALITY: 0.84
+  IMAGE_JPEG_QUALITY: 0.84,
+  ZOOM_APPLY_DELAY_MS: 80
 };
 
 const els = {
@@ -39,7 +33,10 @@ const els = {
   cameraOverlay: document.getElementById('cameraOverlay'),
   gridToggleButton: document.getElementById('gridToggleButton'),
   gridOverlay: document.getElementById('gridOverlay'),
-  zoomBadge: document.getElementById('zoomBadge'),
+
+  zoomControl: document.getElementById('zoomControl'),
+  zoomRange: document.getElementById('zoomRange'),
+  zoomValueText: document.getElementById('zoomValueText'),
 
   cameraVideo: document.getElementById('cameraVideo'),
   emptyPreview: document.getElementById('emptyPreview'),
@@ -72,7 +69,14 @@ const state = {
   imageMimeType: 'image/jpeg',
   objectUrl: '',
 
-  isGridEnabled: false
+  isGridEnabled: false,
+
+  zoomSupported: false,
+  zoomMin: 1,
+  zoomMax: 1,
+  zoomStep: 0.1,
+  zoomValue: 1,
+  zoomApplyTimerId: null
 };
 
 init();
@@ -127,6 +131,7 @@ function bindEvents() {
       '・対象物が全体的に写る距離で撮影してください。\n' +
       '・不具合箇所が小さい場合は、画像メモで補足してください。\n' +
       '・グリッドをONにすると構図を合わせやすくなります。\n' +
+      '・倍率つまみが表示されない端末は、ブラウザがズーム制御に対応していません。\n' +
       '・カメラが使えない場合は「画像を選択」から添付してください。',
       'ok'
     );
@@ -135,6 +140,9 @@ function bindEvents() {
   els.shutterButton.addEventListener('click', handleShutterButtonClick);
   els.retakeButton.addEventListener('click', retakeImage);
   els.gridToggleButton.addEventListener('click', toggleGrid);
+
+  els.zoomRange.addEventListener('input', handleZoomInput);
+  els.zoomRange.addEventListener('change', handleZoomChange);
 
   els.imageFileInput.addEventListener('change', handleImageFileChange);
   els.imageFileInput2.addEventListener('change', handleImageFileChange);
@@ -192,7 +200,7 @@ async function startCamera() {
 
     els.cameraOverlay.classList.remove('hidden');
     renderGridState();
-    setupZoomBadge();
+    setupZoomControl();
 
     els.shutterButton.innerHTML = '<span>📷</span>';
     els.retakeButton.disabled = true;
@@ -359,17 +367,27 @@ function clearPreviewOnly() {
 }
 
 function stopCamera() {
+  if (state.zoomApplyTimerId) {
+    window.clearTimeout(state.zoomApplyTimerId);
+    state.zoomApplyTimerId = null;
+  }
+
   if (state.cameraStream) {
     state.cameraStream.getTracks().forEach((track) => track.stop());
     state.cameraStream = null;
   }
 
   state.cameraTrack = null;
+  state.zoomSupported = false;
+  state.zoomMin = 1;
+  state.zoomMax = 1;
+  state.zoomStep = 0.1;
+  state.zoomValue = 1;
 
   els.cameraVideo.srcObject = null;
   els.cameraVideo.classList.remove('active');
   els.cameraOverlay.classList.add('hidden');
-  els.zoomBadge.classList.add('hidden');
+  els.zoomControl.classList.add('hidden');
 }
 
 function toggleGrid() {
@@ -388,17 +406,28 @@ function renderGridState() {
   els.gridToggleButton.textContent = '▦ グリッド OFF';
 }
 
-function setupZoomBadge() {
+function setupZoomControl() {
   try {
     if (!state.cameraTrack || typeof state.cameraTrack.getCapabilities !== 'function') {
-      els.zoomBadge.classList.add('hidden');
+      hideZoomControl();
       return;
     }
 
     const capabilities = state.cameraTrack.getCapabilities();
 
     if (!capabilities || !capabilities.zoom) {
-      els.zoomBadge.classList.add('hidden');
+      hideZoomControl();
+      return;
+    }
+
+    const zoomCapability = capabilities.zoom;
+
+    const min = Number(zoomCapability.min);
+    const max = Number(zoomCapability.max);
+    const step = Number(zoomCapability.step || 0.1);
+
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
+      hideZoomControl();
       return;
     }
 
@@ -406,19 +435,109 @@ function setupZoomBadge() {
       ? state.cameraTrack.getSettings()
       : {};
 
-    const zoom = Number(settings.zoom || capabilities.zoom.min || 1);
+    const current = Number(settings.zoom || min);
 
-    if (!Number.isFinite(zoom)) {
-      els.zoomBadge.classList.add('hidden');
-      return;
-    }
+    state.zoomSupported = true;
+    state.zoomMin = min;
+    state.zoomMax = max;
+    state.zoomStep = Number.isFinite(step) && step > 0 ? step : 0.1;
+    state.zoomValue = clampZoom(Number.isFinite(current) ? current : min);
 
-    els.zoomBadge.textContent = `${zoom.toFixed(1)}x`;
-    els.zoomBadge.classList.remove('hidden');
+    els.zoomRange.min = String(state.zoomMin);
+    els.zoomRange.max = String(state.zoomMax);
+    els.zoomRange.step = String(state.zoomStep);
+    els.zoomRange.value = String(state.zoomValue);
+
+    updateZoomValueText(state.zoomValue);
+    els.zoomControl.classList.remove('hidden');
 
   } catch (_) {
-    els.zoomBadge.classList.add('hidden');
+    hideZoomControl();
   }
+}
+
+function hideZoomControl() {
+  state.zoomSupported = false;
+  els.zoomControl.classList.add('hidden');
+}
+
+function handleZoomInput(event) {
+  if (!state.zoomSupported) {
+    return;
+  }
+
+  const value = clampZoom(Number(event.target.value));
+  state.zoomValue = value;
+  updateZoomValueText(value);
+
+  if (state.zoomApplyTimerId) {
+    window.clearTimeout(state.zoomApplyTimerId);
+  }
+
+  state.zoomApplyTimerId = window.setTimeout(() => {
+    applyZoom(value);
+  }, CONFIG.ZOOM_APPLY_DELAY_MS);
+}
+
+function handleZoomChange(event) {
+  if (!state.zoomSupported) {
+    return;
+  }
+
+  const value = clampZoom(Number(event.target.value));
+  state.zoomValue = value;
+  updateZoomValueText(value);
+
+  if (state.zoomApplyTimerId) {
+    window.clearTimeout(state.zoomApplyTimerId);
+    state.zoomApplyTimerId = null;
+  }
+
+  applyZoom(value);
+}
+
+async function applyZoom(value) {
+  if (!state.cameraTrack || !state.zoomSupported) {
+    return;
+  }
+
+  const nextZoom = clampZoom(value);
+
+  try {
+    await state.cameraTrack.applyConstraints({
+      advanced: [{ zoom: nextZoom }]
+    });
+
+    const settings = typeof state.cameraTrack.getSettings === 'function'
+      ? state.cameraTrack.getSettings()
+      : {};
+
+    const appliedZoom = Number(settings.zoom || nextZoom);
+    state.zoomValue = clampZoom(Number.isFinite(appliedZoom) ? appliedZoom : nextZoom);
+
+    els.zoomRange.value = String(state.zoomValue);
+    updateZoomValueText(state.zoomValue);
+
+  } catch (error) {
+    setStatus(
+      `倍率変更に失敗しました。\nこの端末ではズーム制御が制限されている可能性があります。\n\n詳細: ${error.message}`,
+      'error'
+    );
+  }
+}
+
+function updateZoomValueText(value) {
+  els.zoomValueText.textContent = `${Number(value).toFixed(1)}x`;
+}
+
+function clampZoom(value) {
+  const numeric = Number(value);
+
+  if (!Number.isFinite(numeric)) {
+    return state.zoomMin;
+  }
+
+  return Math.min(state.zoomMax, Math.max(state.zoomMin, numeric));
 }
 
 async function saveAndGoNext() {
@@ -653,6 +772,7 @@ function disableControls() {
   els.imageFileInput.disabled = true;
   els.imageFileInput2.disabled = true;
   els.gridToggleButton.disabled = true;
+  els.zoomRange.disabled = true;
 }
 
 function getRecommendedBrowserMessage() {
