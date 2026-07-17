@@ -13,7 +13,7 @@
  */
 
 const CONFIG = {
-  GOOGLE_CLIENT_ID: 'ここにOAuthクライアントID.apps.googleusercontent.com',
+  GOOGLE_CLIENT_ID: '866457692941-cro6etg365bkgq6m0qpor789677g11lq.apps.googleusercontent.com',
 
   // 既存の投稿ルートフォルダIDを入れてください
   DRIVE_ROOT_FOLDER_ID: '1oRhXuGn0YE1C-eKyG7MHNObLr1ficZ-p',
