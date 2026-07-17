@@ -28,9 +28,13 @@
 
       <section class="preview-card">
         <div id="cameraOverlay" class="camera-overlay hidden">
-          <div class="top-badge left">⚡ 自動</div>
-          <div class="top-badge right">▦ グリッド</div>
-          <div class="zoom-badge">1.0x</div>
+          <button id="gridToggleButton" class="top-badge right" type="button">
+            ▦ グリッド OFF
+          </button>
+
+          <div id="gridOverlay" class="grid-overlay hidden"></div>
+
+          <div id="zoomBadge" class="zoom-badge hidden">1.0x</div>
         </div>
 
         <video id="cameraVideo" class="camera-video" autoplay playsinline muted></video>
