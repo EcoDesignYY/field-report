@@ -1,795 +1,553 @@
-'use strict';
+(() => {
+  const CONFIG = {
+    DB_NAME: 'field-report-draft-db',
+    DB_VERSION: 1,
+    STORE_NAME: 'draft',
+    AUTH_TOKEN_STORAGE_KEY: 'fieldReportAuthToken',
+    NEXT_PAGE_URL: './confirm.html',
+    IMAGE_MAX_WIDTH: 1600,
+    IMAGE_JPEG_QUALITY: 0.82
+  };
 
-/**
- * 撮影・添付画面 v0.4
- *
- * 変更点:
- * - カメラプレビューを大きく見せるレイアウトに変更
- * - 通常時のステータス欄を非表示化
- * - グリッドON/OFF
- * - 倍率変更つまみ
- * - ズーム対応端末のみ倍率UIを表示
- *
- * この画面ではDrive保存・GAS送信は行わない。
- */
+  const state = {
+    db: null,
+    authToken: '',
+    stream: null,
+    videoTrack: null,
+    imageBlob: null,
+    imageObjectUrl: '',
+    imageMeta: null,
+    isGridEnabled: false,
+    zoomSupported: false,
+    zoomMin: 1,
+    zoomMax: 1,
+    zoomStep: 0.1
+  };
 
-const CONFIG = {
-  NEXT_PAGE_URL: './confirm.html',
-  DB_NAME: 'field-report-draft-db',
-  DB_VERSION: 1,
-  STORE_NAME: 'draft',
-  IMAGE_MAX_WIDTH: 1600,
-  IMAGE_JPEG_QUALITY: 0.84,
-  ZOOM_APPLY_DELAY_MS: 80
-};
+  const els = {};
 
-const els = {
-  backButton: document.getElementById('backButton'),
-  helpButton: document.getElementById('helpButton'),
+  document.addEventListener('DOMContentLoaded', init);
 
-  cameraStatusChip: document.getElementById('cameraStatusChip'),
-  cameraStatusText: document.getElementById('cameraStatusText'),
-
-  previewCard: document.querySelector('.preview-card'),
-  cameraOverlay: document.getElementById('cameraOverlay'),
-  gridToggleButton: document.getElementById('gridToggleButton'),
-  gridOverlay: document.getElementById('gridOverlay'),
-
-  zoomControl: document.getElementById('zoomControl'),
-  zoomRange: document.getElementById('zoomRange'),
-  zoomValueText: document.getElementById('zoomValueText'),
-
-  cameraVideo: document.getElementById('cameraVideo'),
-  emptyPreview: document.getElementById('emptyPreview'),
-  imagePreview: document.getElementById('imagePreview'),
-  captureCanvas: document.getElementById('captureCanvas'),
-
-  retakeButton: document.getElementById('retakeButton'),
-  shutterButton: document.getElementById('shutterButton'),
-
-  imageFileInput: document.getElementById('imageFileInput'),
-  imageFileInput2: document.getElementById('imageFileInput2'),
-
-  cameraModeButton: document.getElementById('cameraModeButton'),
-
-  imageMemoInput: document.getElementById('imageMemoInput'),
-
-  statusBox: document.getElementById('statusBox'),
-
-  nextButton: document.getElementById('nextButton'),
-  skipButton: document.getElementById('skipButton')
-};
-
-const state = {
-  authToken: '',
-  cameraStream: null,
-  cameraTrack: null,
-
-  imageBlob: null,
-  imageFileName: '',
-  imageMimeType: 'image/jpeg',
-  objectUrl: '',
-
-  isGridEnabled: false,
-
-  zoomSupported: false,
-  zoomMin: 1,
-  zoomMax: 1,
-  zoomStep: 0.1,
-  zoomValue: 1,
-  zoomApplyTimerId: null
-};
-
-init();
-
-async function init() {
-  try {
-    state.authToken = getTokenFromSession();
-
-    if (!state.authToken) {
-      setStatus(
-        'このページは直接開けません。\nGAS入口から開いてください。',
-        'error'
-      );
-      disableControls();
-      setCameraStatus('認証が必要です', 'error');
-      return;
-    }
-
-    if (!window.isSecureContext) {
-      setStatus(
-        'このページは安全な接続ではありません。\nカメラを使用するにはHTTPSで開いてください。',
-        'error'
-      );
-      disableControls();
-      setCameraStatus('HTTPSが必要です', 'error');
-      return;
-    }
-
+  async function init() {
+    collectElements();
     bindEvents();
 
-    await restoreDraftImageIfExists();
+    state.authToken = getAuthTokenFromUrlOrStorage();
 
-    if (!state.imageBlob) {
-      setCameraStatus('カメラ準備完了', 'ready');
+    if (!state.authToken) {
+      setFatalState('認証情報がありません。GAS入口から開き直してください。');
+      return;
+    }
+
+    try {
+      state.db = await openDb();
+      await loadExistingDraft();
       setStatus('', '');
+      setCameraStatus('カメラ準備完了', 'ready');
+    } catch (error) {
+      setFatalState('初期化に失敗しました。\n' + getErrorMessage(error));
     }
-
-  } catch (error) {
-    setStatus(`初期化エラー: ${error.message}`, 'error');
-    disableControls();
-  }
-}
-
-function bindEvents() {
-  els.backButton.addEventListener('click', () => {
-    history.back();
-  });
-
-  els.helpButton.addEventListener('click', () => {
-    setStatus(
-      '撮影のコツ:\n' +
-      '・対象物が全体的に写る距離で撮影してください。\n' +
-      '・不具合箇所が小さい場合は、画像メモで補足してください。\n' +
-      '・グリッドをONにすると構図を合わせやすくなります。\n' +
-      '・倍率つまみが表示されない端末は、ブラウザがズーム制御に対応していません。\n' +
-      '・カメラが使えない場合は「画像を選択」から添付してください。',
-      'ok'
-    );
-  });
-
-  els.shutterButton.addEventListener('click', handleShutterButtonClick);
-  els.retakeButton.addEventListener('click', retakeImage);
-  els.gridToggleButton.addEventListener('click', toggleGrid);
-
-  els.zoomRange.addEventListener('input', handleZoomInput);
-  els.zoomRange.addEventListener('change', handleZoomChange);
-
-  els.imageFileInput.addEventListener('change', handleImageFileChange);
-  els.imageFileInput2.addEventListener('change', handleImageFileChange);
-
-  els.cameraModeButton.addEventListener('click', async () => {
-    await startCamera();
-  });
-
-  els.nextButton.addEventListener('click', saveAndGoNext);
-  els.skipButton.addEventListener('click', skipAndGoNext);
-
-  window.addEventListener('pagehide', () => {
-    stopCamera();
-  });
-}
-
-function getTokenFromSession() {
-  return sessionStorage.getItem('fieldReportToken') || '';
-}
-
-async function handleShutterButtonClick() {
-  if (!state.cameraStream) {
-    await startCamera();
-    return;
   }
 
-  captureImage();
-}
+  function collectElements() {
+    els.backButton = document.getElementById('backButton');
+    els.helpButton = document.getElementById('helpButton');
+    els.cameraStatusBadge = document.getElementById('cameraStatusBadge');
+    els.cameraVideo = document.getElementById('cameraVideo');
+    els.imagePreview = document.getElementById('imagePreview');
+    els.emptyPreview = document.getElementById('emptyPreview');
+    els.gridOverlay = document.getElementById('gridOverlay');
+    els.gridToggleButton = document.getElementById('gridToggleButton');
+    els.zoomBadge = document.getElementById('zoomBadge');
+    els.zoomControl = document.getElementById('zoomControl');
+    els.zoomValueText = document.getElementById('zoomValueText');
+    els.zoomRange = document.getElementById('zoomRange');
+    els.startCameraButton = document.getElementById('startCameraButton');
+    els.captureButton = document.getElementById('captureButton');
+    els.fileSelectButton = document.getElementById('fileSelectButton');
+    els.imageFileInput = document.getElementById('imageFileInput');
+    els.resetImageButton = document.getElementById('resetImageButton');
+    els.stopCameraButton = document.getElementById('stopCameraButton');
+    els.imageMemoInput = document.getElementById('imageMemoInput');
+    els.nextButton = document.getElementById('nextButton');
+    els.statusBox = document.getElementById('statusBox');
+  }
 
-async function startCamera() {
-  try {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('このブラウザはカメラ取得に対応していません。');
-    }
-
-    clearPreviewOnly();
-    stopCamera();
-
-    state.cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 960 }
-      },
-      audio: false
+  function bindEvents() {
+    els.backButton.addEventListener('click', () => {
+      location.href = './record.html';
     });
 
-    state.cameraTrack = state.cameraStream.getVideoTracks()[0] || null;
+    els.helpButton.addEventListener('click', () => {
+      setStatus(
+        'カメラ起動後に中央の丸いボタンで撮影できます。\n画像ファイルを選択することもできます。画像なしでも次へ進めます。',
+        'info'
+      );
+    });
 
-    els.cameraVideo.srcObject = state.cameraStream;
-    els.cameraVideo.classList.add('active');
+    els.startCameraButton.addEventListener('click', startCamera);
+    els.captureButton.addEventListener('click', captureImage);
+    els.fileSelectButton.addEventListener('click', () => els.imageFileInput.click());
+    els.imageFileInput.addEventListener('change', handleImageFileChange);
+    els.resetImageButton.addEventListener('click', resetImage);
+    els.stopCameraButton.addEventListener('click', stopCamera);
+    els.gridToggleButton.addEventListener('click', toggleGrid);
+    els.zoomRange.addEventListener('input', handleZoomInput);
+    els.zoomRange.addEventListener('change', handleZoomChange);
+    els.nextButton.addEventListener('click', saveAndGoNext);
+  }
 
-    els.emptyPreview.classList.add('hidden');
-    els.imagePreview.classList.add('hidden');
+  function getAuthTokenFromUrlOrStorage() {
+    const url = new URL(location.href);
+    const tokenFromUrl = url.searchParams.get('token');
 
-    els.cameraOverlay.classList.remove('hidden');
-    renderGridState();
-    setupZoomControl();
+    if (tokenFromUrl) {
+      sessionStorage.setItem(CONFIG.AUTH_TOKEN_STORAGE_KEY, tokenFromUrl);
+      sessionStorage.setItem('fieldReportToken', tokenFromUrl);
 
-    els.shutterButton.innerHTML = '<span>📷</span>';
-    els.retakeButton.disabled = true;
-    els.nextButton.disabled = true;
+      url.searchParams.delete('token');
+      history.replaceState({}, document.title, url.toString());
 
-    setCameraStatus('カメラ起動中', 'active');
-    setStatus('', '');
+      return tokenFromUrl;
+    }
 
-  } catch (error) {
-    stopCamera();
-    setCameraStatus('カメラ不可', 'error');
-
-    setStatus(
-      `カメラを起動できませんでした。\n\n` +
-      `原因候補:\n` +
-      `・カメラ権限が拒否されている\n` +
-      `・アプリ内ブラウザで開いている\n` +
-      `・端末側でカメラ使用が制限されている\n\n` +
-      `対処:\n` +
-      `・iPhoneはSafariで開いてください\n` +
-      `・AndroidはChromeで開いてください\n` +
-      `・ecodesignyy.github.io のカメラ権限を許可してください\n` +
-      `・カメラ不可の場合は「画像を選択」から添付してください\n\n` +
-      `詳細: ${error.message}`,
-      'error'
+    return (
+      sessionStorage.getItem(CONFIG.AUTH_TOKEN_STORAGE_KEY) ||
+      sessionStorage.getItem('fieldReportToken') ||
+      ''
     );
   }
-}
 
-function captureImage() {
-  if (!state.cameraStream) {
-    setStatus('カメラが起動していません。', 'error');
-    return;
+  async function startCamera() {
+    try {
+      if (!window.isSecureContext) {
+        throw new Error('カメラにはHTTPS環境が必要です。GitHub PagesのURLを直接開いてください。');
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('このブラウザはカメラ機能に対応していません。');
+      }
+
+      stopCamera();
+
+      const constraints = {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      };
+
+      state.stream = await navigator.mediaDevices.getUserMedia(constraints);
+      els.cameraVideo.srcObject = state.stream;
+      await els.cameraVideo.play();
+
+      state.videoTrack = state.stream.getVideoTracks()[0] || null;
+
+      els.cameraVideo.classList.remove('hidden');
+      els.emptyPreview.classList.add('hidden');
+      els.captureButton.disabled = false;
+      els.stopCameraButton.disabled = false;
+
+      setCameraStatus('カメラ起動中', 'active');
+      setupZoomControl();
+
+    } catch (error) {
+      stopCamera();
+      setCameraStatus('カメラ不可', 'error');
+      setStatus('カメラを起動できませんでした。\n' + getErrorMessage(error), 'error');
+    }
   }
 
-  const video = els.cameraVideo;
-  const canvas = els.captureCanvas;
-
-  const sourceWidth = video.videoWidth;
-  const sourceHeight = video.videoHeight;
-
-  if (!sourceWidth || !sourceHeight) {
-    setStatus('カメラ映像の取得に失敗しました。', 'error');
-    return;
-  }
-
-  const size = calculateResizeSize(sourceWidth, sourceHeight, CONFIG.IMAGE_MAX_WIDTH);
-
-  canvas.width = size.width;
-  canvas.height = size.height;
-
-  const context = canvas.getContext('2d');
-  context.drawImage(video, 0, 0, size.width, size.height);
-
-  canvas.toBlob((blob) => {
-    if (!blob) {
-      setStatus('画像生成に失敗しました。', 'error');
+  async function captureImage() {
+    if (!els.cameraVideo.videoWidth || !els.cameraVideo.videoHeight) {
+      setStatus('カメラ映像を取得できていません。少し待ってから撮影してください。', 'warning');
       return;
+    }
+
+    try {
+      const sourceWidth = els.cameraVideo.videoWidth;
+      const sourceHeight = els.cameraVideo.videoHeight;
+
+      const scale = Math.min(1, CONFIG.IMAGE_MAX_WIDTH / sourceWidth);
+      const width = Math.round(sourceWidth * scale);
+      const height = Math.round(sourceHeight * scale);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(els.cameraVideo, 0, 0, width, height);
+
+      const blob = await canvasToBlob(canvas, 'image/jpeg', CONFIG.IMAGE_JPEG_QUALITY);
+
+      setImageBlob(blob, {
+        source: 'camera',
+        width,
+        height,
+        mimeType: blob.type,
+        size: blob.size,
+        capturedAt: new Date().toISOString()
+      });
+
+      stopCamera();
+      setStatus('画像を撮影しました。', 'success');
+
+    } catch (error) {
+      setStatus('撮影に失敗しました。\n' + getErrorMessage(error), 'error');
+    }
+  }
+
+  async function handleImageFileChange(event) {
+    const file = event.target.files && event.target.files[0];
+
+    if (!file) return;
+
+    if (!file.type || !file.type.startsWith('image/')) {
+      setStatus('画像ファイルを選択してください。', 'error');
+      return;
+    }
+
+    try {
+      const normalized = await normalizeImageFile(file);
+
+      setImageBlob(normalized.blob, {
+        source: 'file',
+        originalName: file.name,
+        width: normalized.width,
+        height: normalized.height,
+        mimeType: normalized.blob.type,
+        size: normalized.blob.size,
+        selectedAt: new Date().toISOString()
+      });
+
+      stopCamera();
+      setStatus('画像を読み込みました。', 'success');
+
+    } catch (error) {
+      setStatus('画像の読込に失敗しました。\n' + getErrorMessage(error), 'error');
+    } finally {
+      els.imageFileInput.value = '';
+    }
+  }
+
+  function setImageBlob(blob, meta) {
+    if (state.imageObjectUrl) {
+      URL.revokeObjectURL(state.imageObjectUrl);
     }
 
     state.imageBlob = blob;
-    state.imageMimeType = 'image/jpeg';
-    state.imageFileName = `image_${formatDateForFile(new Date())}.jpg`;
+    state.imageMeta = meta || {};
+    state.imageObjectUrl = URL.createObjectURL(blob);
 
-    setupImagePreview(blob);
-    stopCamera();
-
-    els.retakeButton.disabled = false;
-    els.nextButton.disabled = false;
-
-    setCameraStatus('画像選択済み', 'ready');
-    setStatus('', '');
-
-  }, 'image/jpeg', CONFIG.IMAGE_JPEG_QUALITY);
-}
-
-async function handleImageFileChange(event) {
-  const file = event.target.files && event.target.files[0];
-
-  if (!file) {
-    return;
+    els.imagePreview.src = state.imageObjectUrl;
+    els.imagePreview.classList.remove('hidden');
+    els.emptyPreview.classList.add('hidden');
+    els.resetImageButton.disabled = false;
   }
 
-  if (!file.type.startsWith('image/')) {
-    setStatus('画像ファイルを選択してください。', 'error');
-    return;
+  function resetImage() {
+    if (state.imageObjectUrl) {
+      URL.revokeObjectURL(state.imageObjectUrl);
+      state.imageObjectUrl = '';
+    }
+
+    state.imageBlob = null;
+    state.imageMeta = null;
+    els.imagePreview.removeAttribute('src');
+    els.imagePreview.classList.add('hidden');
+
+    if (!state.stream) {
+      els.emptyPreview.classList.remove('hidden');
+    }
+
+    els.resetImageButton.disabled = true;
+    setStatus('画像を削除しました。', 'info');
   }
 
-  try {
-    stopCamera();
+  function stopCamera() {
+    if (state.stream) {
+      state.stream.getTracks().forEach(track => track.stop());
+    }
 
-    const resizedBlob = await resizeImageFile(
-      file,
-      CONFIG.IMAGE_MAX_WIDTH,
-      CONFIG.IMAGE_JPEG_QUALITY
-    );
+    state.stream = null;
+    state.videoTrack = null;
+    els.cameraVideo.srcObject = null;
+    els.captureButton.disabled = true;
+    els.stopCameraButton.disabled = true;
+    els.zoomControl.classList.add('hidden');
+    els.zoomBadge.classList.add('hidden');
 
-    state.imageBlob = resizedBlob;
-    state.imageMimeType = 'image/jpeg';
-    state.imageFileName = normalizeFileName(file.name || `image_${formatDateForFile(new Date())}.jpg`);
+    if (!state.imageBlob) {
+      els.emptyPreview.classList.remove('hidden');
+    }
 
-    setupImagePreview(resizedBlob);
-
-    els.retakeButton.disabled = false;
-    els.nextButton.disabled = false;
-
-    setCameraStatus('画像選択済み', 'ready');
-    setStatus('', '');
-
-  } catch (error) {
-    setStatus(`画像処理エラー: ${error.message}`, 'error');
-  } finally {
-    els.imageFileInput.value = '';
-    els.imageFileInput2.value = '';
-  }
-}
-
-function setupImagePreview(blob) {
-  if (state.objectUrl) {
-    URL.revokeObjectURL(state.objectUrl);
+    setCameraStatus('カメラ準備完了', 'ready');
   }
 
-  state.objectUrl = URL.createObjectURL(blob);
-
-  els.imagePreview.src = state.objectUrl;
-  els.imagePreview.classList.remove('hidden');
-
-  els.cameraVideo.classList.remove('active');
-  els.emptyPreview.classList.add('hidden');
-  els.cameraOverlay.classList.add('hidden');
-}
-
-async function retakeImage() {
-  state.imageBlob = null;
-  state.imageFileName = '';
-  state.imageMimeType = 'image/jpeg';
-
-  if (state.objectUrl) {
-    URL.revokeObjectURL(state.objectUrl);
-    state.objectUrl = '';
+  function toggleGrid() {
+    state.isGridEnabled = !state.isGridEnabled;
+    renderGridState();
   }
 
-  els.imagePreview.removeAttribute('src');
-  els.imagePreview.classList.add('hidden');
-  els.nextButton.disabled = true;
-  els.retakeButton.disabled = true;
-
-  await deleteDraftKey('imageBlob');
-  await deleteDraftKey('imageMeta');
-
-  await startCamera();
-}
-
-function clearPreviewOnly() {
-  if (state.objectUrl) {
-    URL.revokeObjectURL(state.objectUrl);
-    state.objectUrl = '';
+  function renderGridState() {
+    if (state.isGridEnabled) {
+      els.gridOverlay.classList.remove('hidden');
+      els.gridToggleButton.textContent = 'グリッド ON';
+    } else {
+      els.gridOverlay.classList.add('hidden');
+      els.gridToggleButton.textContent = 'グリッド OFF';
+    }
   }
 
-  els.imagePreview.removeAttribute('src');
-  els.imagePreview.classList.add('hidden');
-  els.emptyPreview.classList.remove('hidden');
-  els.cameraOverlay.classList.add('hidden');
-}
+  function setupZoomControl() {
+    state.zoomSupported = false;
+    els.zoomControl.classList.add('hidden');
+    els.zoomBadge.classList.add('hidden');
 
-function stopCamera() {
-  if (state.zoomApplyTimerId) {
-    window.clearTimeout(state.zoomApplyTimerId);
-    state.zoomApplyTimerId = null;
-  }
-
-  if (state.cameraStream) {
-    state.cameraStream.getTracks().forEach((track) => track.stop());
-    state.cameraStream = null;
-  }
-
-  state.cameraTrack = null;
-  state.zoomSupported = false;
-  state.zoomMin = 1;
-  state.zoomMax = 1;
-  state.zoomStep = 0.1;
-  state.zoomValue = 1;
-
-  els.cameraVideo.srcObject = null;
-  els.cameraVideo.classList.remove('active');
-  els.cameraOverlay.classList.add('hidden');
-  els.zoomControl.classList.add('hidden');
-}
-
-function toggleGrid() {
-  state.isGridEnabled = !state.isGridEnabled;
-  renderGridState();
-}
-
-function renderGridState() {
-  if (state.isGridEnabled) {
-    els.gridOverlay.classList.remove('hidden');
-    els.gridToggleButton.textContent = '▦ グリッド ON';
-    return;
-  }
-
-  els.gridOverlay.classList.add('hidden');
-  els.gridToggleButton.textContent = '▦ グリッド OFF';
-}
-
-function setupZoomControl() {
-  try {
-    if (!state.cameraTrack || typeof state.cameraTrack.getCapabilities !== 'function') {
-      hideZoomControl();
+    if (!state.videoTrack || typeof state.videoTrack.getCapabilities !== 'function') {
       return;
     }
 
-    const capabilities = state.cameraTrack.getCapabilities();
+    const caps = state.videoTrack.getCapabilities();
 
-    if (!capabilities || !capabilities.zoom) {
-      hideZoomControl();
+    if (!caps || !caps.zoom) {
       return;
     }
-
-    const zoomCapability = capabilities.zoom;
-
-    const min = Number(zoomCapability.min);
-    const max = Number(zoomCapability.max);
-    const step = Number(zoomCapability.step || 0.1);
-
-    if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
-      hideZoomControl();
-      return;
-    }
-
-    const settings = typeof state.cameraTrack.getSettings === 'function'
-      ? state.cameraTrack.getSettings()
-      : {};
-
-    const current = Number(settings.zoom || min);
 
     state.zoomSupported = true;
-    state.zoomMin = min;
-    state.zoomMax = max;
-    state.zoomStep = Number.isFinite(step) && step > 0 ? step : 0.1;
-    state.zoomValue = clampZoom(Number.isFinite(current) ? current : min);
+    state.zoomMin = caps.zoom.min || 1;
+    state.zoomMax = caps.zoom.max || 1;
+    state.zoomStep = caps.zoom.step || 0.1;
 
     els.zoomRange.min = String(state.zoomMin);
     els.zoomRange.max = String(state.zoomMax);
     els.zoomRange.step = String(state.zoomStep);
-    els.zoomRange.value = String(state.zoomValue);
+    els.zoomRange.value = String(state.zoomMin);
 
-    updateZoomValueText(state.zoomValue);
+    renderZoomValue(state.zoomMin);
+
     els.zoomControl.classList.remove('hidden');
-
-  } catch (_) {
-    hideZoomControl();
-  }
-}
-
-function hideZoomControl() {
-  state.zoomSupported = false;
-  els.zoomControl.classList.add('hidden');
-}
-
-function handleZoomInput(event) {
-  if (!state.zoomSupported) {
-    return;
+    els.zoomBadge.classList.remove('hidden');
   }
 
-  const value = clampZoom(Number(event.target.value));
-  state.zoomValue = value;
-  updateZoomValueText(value);
-
-  if (state.zoomApplyTimerId) {
-    window.clearTimeout(state.zoomApplyTimerId);
+  function handleZoomInput() {
+    const value = Number(els.zoomRange.value || state.zoomMin);
+    renderZoomValue(value);
   }
 
-  state.zoomApplyTimerId = window.setTimeout(() => {
-    applyZoom(value);
-  }, CONFIG.ZOOM_APPLY_DELAY_MS);
-}
-
-function handleZoomChange(event) {
-  if (!state.zoomSupported) {
-    return;
+  async function handleZoomChange() {
+    const value = Number(els.zoomRange.value || state.zoomMin);
+    await applyZoom(value);
   }
 
-  const value = clampZoom(Number(event.target.value));
-  state.zoomValue = value;
-  updateZoomValueText(value);
+  async function applyZoom(value) {
+    if (!state.videoTrack || !state.zoomSupported) return;
 
-  if (state.zoomApplyTimerId) {
-    window.clearTimeout(state.zoomApplyTimerId);
-    state.zoomApplyTimerId = null;
+    try {
+      await state.videoTrack.applyConstraints({
+        advanced: [{ zoom: value }]
+      });
+
+      renderZoomValue(value);
+
+    } catch (error) {
+      setStatus('倍率変更に対応していない端末です。', 'warning');
+    }
   }
 
-  applyZoom(value);
-}
-
-async function applyZoom(value) {
-  if (!state.cameraTrack || !state.zoomSupported) {
-    return;
+  function renderZoomValue(value) {
+    const text = Number(value).toFixed(1) + 'x';
+    els.zoomValueText.textContent = text;
+    els.zoomBadge.textContent = text;
   }
 
-  const nextZoom = clampZoom(value);
+  async function saveAndGoNext() {
+    try {
+      const memo = els.imageMemoInput.value.trim();
 
-  try {
-    await state.cameraTrack.applyConstraints({
-      advanced: [{ zoom: nextZoom }]
+      if (state.imageBlob) {
+        const meta = {
+          ...(state.imageMeta || {}),
+          memo,
+          savedAt: new Date().toISOString()
+        };
+
+        await putDraft('imageBlob', state.imageBlob);
+        await putDraft('imageMeta', meta);
+      } else {
+        await deleteDraft('imageBlob');
+        await deleteDraft('imageMeta');
+      }
+
+      stopCamera();
+      location.href = CONFIG.NEXT_PAGE_URL;
+
+    } catch (error) {
+      setStatus('画像データの保存に失敗しました。\n' + getErrorMessage(error), 'error');
+    }
+  }
+
+  async function loadExistingDraft() {
+    const imageBlob = await getDraft('imageBlob');
+    const imageMeta = await getDraft('imageMeta');
+
+    if (imageBlob) {
+      setImageBlob(imageBlob, imageMeta || {});
+
+      if (imageMeta && imageMeta.memo) {
+        els.imageMemoInput.value = imageMeta.memo;
+      }
+    }
+  }
+
+  function normalizeImageFile(file) {
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+
+      img.onload = async () => {
+        try {
+          const sourceWidth = img.naturalWidth;
+          const sourceHeight = img.naturalHeight;
+          const scale = Math.min(1, CONFIG.IMAGE_MAX_WIDTH / sourceWidth);
+          const width = Math.round(sourceWidth * scale);
+          const height = Math.round(sourceHeight * scale);
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const blob = await canvasToBlob(canvas, 'image/jpeg', CONFIG.IMAGE_JPEG_QUALITY);
+
+          URL.revokeObjectURL(objectUrl);
+
+          resolve({
+            blob,
+            width,
+            height
+          });
+
+        } catch (error) {
+          URL.revokeObjectURL(objectUrl);
+          reject(error);
+        }
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('画像ファイルを読み込めませんでした。'));
+      };
+
+      img.src = objectUrl;
     });
-
-    const settings = typeof state.cameraTrack.getSettings === 'function'
-      ? state.cameraTrack.getSettings()
-      : {};
-
-    const appliedZoom = Number(settings.zoom || nextZoom);
-    state.zoomValue = clampZoom(Number.isFinite(appliedZoom) ? appliedZoom : nextZoom);
-
-    els.zoomRange.value = String(state.zoomValue);
-    updateZoomValueText(state.zoomValue);
-
-  } catch (error) {
-    setStatus(
-      `倍率変更に失敗しました。\nこの端末ではズーム制御が制限されている可能性があります。\n\n詳細: ${error.message}`,
-      'error'
-    );
-  }
-}
-
-function updateZoomValueText(value) {
-  els.zoomValueText.textContent = `${Number(value).toFixed(1)}x`;
-}
-
-function clampZoom(value) {
-  const numeric = Number(value);
-
-  if (!Number.isFinite(numeric)) {
-    return state.zoomMin;
   }
 
-  return Math.min(state.zoomMax, Math.max(state.zoomMin, numeric));
-}
+  function canvasToBlob(canvas, type, quality) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(blob => {
+        if (!blob) {
+          reject(new Error('画像Blobの作成に失敗しました。'));
+          return;
+        }
 
-async function saveAndGoNext() {
-  try {
-    if (!state.imageBlob) {
-      setStatus('画像がありません。撮影または画像選択を行ってください。', 'error');
+        resolve(blob);
+      }, type, quality);
+    });
+  }
+
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
+
+      req.onupgradeneeded = event => {
+        const db = event.target.result;
+
+        if (!db.objectStoreNames.contains(CONFIG.STORE_NAME)) {
+          db.createObjectStore(CONFIG.STORE_NAME);
+        }
+      };
+
+      req.onsuccess = event => resolve(event.target.result);
+      req.onerror = event => reject(event.target.error);
+    });
+  }
+
+  function getDraft(key) {
+    return new Promise((resolve, reject) => {
+      const tx = state.db.transaction(CONFIG.STORE_NAME, 'readonly');
+      const store = tx.objectStore(CONFIG.STORE_NAME);
+      const req = store.get(key);
+
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = event => reject(event.target.error);
+    });
+  }
+
+  function putDraft(key, value) {
+    return new Promise((resolve, reject) => {
+      const tx = state.db.transaction(CONFIG.STORE_NAME, 'readwrite');
+      const store = tx.objectStore(CONFIG.STORE_NAME);
+      const req = store.put(value, key);
+
+      req.onsuccess = () => resolve();
+      req.onerror = event => reject(event.target.error);
+    });
+  }
+
+  function deleteDraft(key) {
+    return new Promise((resolve, reject) => {
+      const tx = state.db.transaction(CONFIG.STORE_NAME, 'readwrite');
+      const store = tx.objectStore(CONFIG.STORE_NAME);
+      const req = store.delete(key);
+
+      req.onsuccess = () => resolve();
+      req.onerror = event => reject(event.target.error);
+    });
+  }
+
+  function setCameraStatus(text, type) {
+    els.cameraStatusBadge.textContent = text;
+    els.cameraStatusBadge.classList.remove('status-ready', 'status-active', 'status-error');
+
+    if (type === 'active') {
+      els.cameraStatusBadge.classList.add('status-active');
+    } else if (type === 'error') {
+      els.cameraStatusBadge.classList.add('status-error');
+    } else {
+      els.cameraStatusBadge.classList.add('status-ready');
+    }
+  }
+
+  function setFatalState(message) {
+    setCameraStatus('利用不可', 'error');
+    setStatus(message, 'error');
+    els.startCameraButton.disabled = true;
+    els.captureButton.disabled = true;
+    els.fileSelectButton.disabled = true;
+    els.nextButton.disabled = true;
+  }
+
+  function setStatus(message, type = 'info') {
+    if (!message) {
+      els.statusBox.classList.add('hidden');
+      els.statusBox.textContent = '';
       return;
     }
 
-    await saveDraftToIndexedDb();
-
-    sessionStorage.setItem('fieldReportHasImage', '1');
-    location.href = CONFIG.NEXT_PAGE_URL;
-
-  } catch (error) {
-    setStatus(`保存エラー: ${error.message}`, 'error');
-  }
-}
-
-async function skipAndGoNext() {
-  sessionStorage.setItem('fieldReportHasImage', '0');
-  location.href = CONFIG.NEXT_PAGE_URL;
-}
-
-async function saveDraftToIndexedDb() {
-  const memo = els.imageMemoInput.value.trim();
-
-  if (state.imageBlob) {
-    await putDraft('imageBlob', state.imageBlob);
+    els.statusBox.classList.remove('hidden', 'info', 'success', 'error', 'warning');
+    els.statusBox.classList.add(type);
+    els.statusBox.textContent = message;
   }
 
-  await putDraft('imageMeta', {
-    fileName: state.imageFileName,
-    mimeType: state.imageMimeType,
-    size: state.imageBlob ? state.imageBlob.size : 0,
-    memo,
-    savedAt: new Date().toISOString()
-  });
-}
-
-async function restoreDraftImageIfExists() {
-  const blob = await getDraft('imageBlob');
-  const meta = await getDraft('imageMeta');
-
-  if (!blob) {
-    return;
+  function getErrorMessage(error) {
+    if (!error) return '不明なエラーです。';
+    if (error.message) return String(error.message);
+    return String(error);
   }
-
-  state.imageBlob = blob;
-  state.imageMimeType = meta && meta.mimeType ? meta.mimeType : blob.type || 'image/jpeg';
-  state.imageFileName = meta && meta.fileName ? meta.fileName : `image_${formatDateForFile(new Date())}.jpg`;
-
-  if (meta && meta.memo) {
-    els.imageMemoInput.value = meta.memo;
-  }
-
-  setupImagePreview(blob);
-
-  els.retakeButton.disabled = false;
-  els.nextButton.disabled = false;
-
-  setCameraStatus('画像復元済み', 'ready');
-  setStatus('前回保存した画像データを復元しました。', 'ok');
-}
-
-function resizeImageFile(file, maxWidth, quality) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-
-    img.onload = () => {
-      try {
-        const size = calculateResizeSize(img.naturalWidth, img.naturalHeight, maxWidth);
-        const canvas = document.createElement('canvas');
-
-        canvas.width = size.width;
-        canvas.height = size.height;
-
-        const context = canvas.getContext('2d');
-        context.drawImage(img, 0, 0, size.width, size.height);
-
-        canvas.toBlob((blob) => {
-          URL.revokeObjectURL(url);
-
-          if (!blob) {
-            reject(new Error('画像圧縮に失敗しました。'));
-            return;
-          }
-
-          resolve(blob);
-        }, 'image/jpeg', quality);
-
-      } catch (error) {
-        URL.revokeObjectURL(url);
-        reject(error);
-      }
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('画像を読み込めませんでした。'));
-    };
-
-    img.src = url;
-  });
-}
-
-function calculateResizeSize(width, height, maxWidth) {
-  if (width <= maxWidth) {
-    return { width, height };
-  }
-
-  const ratio = maxWidth / width;
-
-  return {
-    width: Math.round(width * ratio),
-    height: Math.round(height * ratio)
-  };
-}
-
-function normalizeFileName(name) {
-  const safeName = String(name)
-    .replace(/[\\/:*?"<>|]/g, '_')
-    .trim();
-
-  if (!safeName) {
-    return `image_${formatDateForFile(new Date())}.jpg`;
-  }
-
-  if (!/\.(jpg|jpeg|png|webp)$/i.test(safeName)) {
-    return `${safeName}.jpg`;
-  }
-
-  return safeName;
-}
-
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(CONFIG.STORE_NAME)) {
-        db.createObjectStore(CONFIG.STORE_NAME);
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(new Error('IndexedDBを開けませんでした。'));
-  });
-}
-
-async function putDraft(key, value) {
-  const db = await openDb();
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(CONFIG.STORE_NAME, 'readwrite');
-    tx.objectStore(CONFIG.STORE_NAME).put(value, key);
-    tx.oncomplete = () => {
-      db.close();
-      resolve();
-    };
-    tx.onerror = () => {
-      db.close();
-      reject(new Error('下書き保存に失敗しました。'));
-    };
-  });
-}
-
-async function getDraft(key) {
-  const db = await openDb();
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(CONFIG.STORE_NAME, 'readonly');
-    const request = tx.objectStore(CONFIG.STORE_NAME).get(key);
-
-    request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(new Error('下書き取得に失敗しました。'));
-
-    tx.oncomplete = () => db.close();
-  });
-}
-
-async function deleteDraftKey(key) {
-  const db = await openDb();
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(CONFIG.STORE_NAME, 'readwrite');
-    tx.objectStore(CONFIG.STORE_NAME).delete(key);
-    tx.oncomplete = () => {
-      db.close();
-      resolve();
-    };
-    tx.onerror = () => {
-      db.close();
-      reject(new Error('下書き削除に失敗しました。'));
-    };
-  });
-}
-
-function setCameraStatus(text, mode) {
-  els.cameraStatusText.textContent = text;
-  els.cameraStatusChip.classList.remove('error', 'active');
-
-  if (mode === 'error') {
-    els.cameraStatusChip.classList.add('error');
-  }
-
-  if (mode === 'active') {
-    els.cameraStatusChip.classList.add('active');
-  }
-}
-
-function setStatus(message, type) {
-  if (!message) {
-    els.statusBox.textContent = '';
-    els.statusBox.classList.add('hidden');
-    els.statusBox.classList.remove('ok', 'error');
-    return;
-  }
-
-  els.statusBox.textContent = message;
-  els.statusBox.classList.remove('hidden', 'ok', 'error');
-
-  if (type === 'ok') {
-    els.statusBox.classList.add('ok');
-  }
-
-  if (type === 'error') {
-    els.statusBox.classList.add('error');
-  }
-}
-
-function disableControls() {
-  els.shutterButton.disabled = true;
-  els.retakeButton.disabled = true;
-  els.nextButton.disabled = true;
-  els.skipButton.disabled = true;
-  els.imageFileInput.disabled = true;
-  els.imageFileInput2.disabled = true;
-  els.gridToggleButton.disabled = true;
-  els.zoomRange.disabled = true;
-}
-
-function formatDateForFile(date) {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
-  const mi = String(date.getMinutes()).padStart(2, '0');
-  const ss = String(date.getSeconds()).padStart(2, '0');
-
-  return `${yyyy}${mm}${dd}_${hh}${mi}${ss}`;
-}
+})();
