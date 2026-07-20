@@ -1,128 +1,84 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>撮影・添付 | 現場問題提起</title>
-  <link rel="stylesheet" href="./capture.css?v=camera-large-001">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>撮影・添付</title>
+  <link rel="stylesheet" href="./capture.css?v=full-001">
 </head>
 <body>
-  <main class="screen">
+  <div class="app-shell">
     <header class="top-bar">
-      <button id="backButton" class="icon-button" type="button" aria-label="戻る">
-        ‹
-      </button>
-      <h1>撮影・添付</h1>
-      <button id="helpButton" class="help-button" type="button" aria-label="ヘルプ">
-        ?
-      </button>
+      <button id="backButton" type="button" class="top-button">戻る</button>
+      <div class="top-title">撮影・添付</div>
+      <button id="helpButton" type="button" class="top-button">ヘルプ</button>
     </header>
 
-    <section class="content">
-      <p class="lead">現場の状況を写真で記録</p>
+    <main class="content">
+      <section class="hero-card">
+        <div id="cameraStatusBadge" class="status-badge status-ready">カメラ準備中</div>
+        <h1>現場の状況を写真で記録</h1>
+        <p>対象が分かるように撮影してください。画像なしでも次へ進めます。</p>
+      </section>
 
-      <div id="cameraStatusChip" class="status-chip">
-        <span class="chip-icon">📷</span>
-        <span id="cameraStatusText">カメラ準備中</span>
-      </div>
-
-      <section class="preview-card">
-        <div id="cameraOverlay" class="camera-overlay hidden">
-          <button id="gridToggleButton" class="top-badge right" type="button">
-            ▦ グリッド OFF
-          </button>
+      <section class="camera-card">
+        <div class="preview-card">
+          <video id="cameraVideo" autoplay playsinline muted></video>
+          <img id="imagePreview" alt="撮影画像プレビュー" class="hidden">
+          <div id="emptyPreview" class="empty-preview">カメラを起動、または画像を選択してください</div>
 
           <div id="gridOverlay" class="grid-overlay hidden"></div>
 
-          <div id="zoomControl" class="zoom-control hidden">
-            <div class="zoom-head">
-              <span>倍率</span>
-              <strong id="zoomValueText">1.0x</strong>
-            </div>
-            <input
-              id="zoomRange"
-              class="zoom-range"
-              type="range"
-              min="1"
-              max="1"
-              step="0.1"
-              value="1"
-            >
+          <div class="preview-top">
+            <button id="gridToggleButton" type="button" class="top-badge">グリッド OFF</button>
+            <span id="zoomBadge" class="top-badge hidden">1.0x</span>
           </div>
         </div>
 
-        <video id="cameraVideo" class="camera-video" autoplay playsinline muted></video>
-
-        <div id="emptyPreview" class="empty-preview">
-          <div class="empty-icon">📷</div>
-          <div class="empty-title">画像未選択</div>
-          <div class="empty-text">カメラで撮影するか、画像を選択してください</div>
+        <div id="zoomControl" class="zoom-control hidden">
+          <div class="zoom-head">
+            <span>倍率</span>
+            <span id="zoomValueText">1.0x</span>
+          </div>
+          <input id="zoomRange" class="zoom-range" type="range" min="1" max="1" step="0.1" value="1">
         </div>
 
-        <img id="imagePreview" class="image-preview hidden" alt="画像プレビュー">
+        <div class="capture-controls">
+          <button id="startCameraButton" type="button" class="secondary-button">カメラ起動</button>
+          <button id="captureButton" type="button" class="shutter-button" disabled aria-label="撮影"></button>
+          <button id="fileSelectButton" type="button" class="secondary-button">画像を選択</button>
+        </div>
 
-        <canvas id="captureCanvas" class="hidden"></canvas>
-      </section>
+        <div class="sub-controls">
+          <button id="resetImageButton" type="button" class="secondary-button" disabled>画像を削除</button>
+          <button id="stopCameraButton" type="button" class="secondary-button" disabled>カメラ停止</button>
+        </div>
 
-      <div class="guide-text">
-        ⓘ 対象が全体的に写るように撮影してください
-      </div>
-
-      <section class="capture-controls">
-        <button id="retakeButton" class="side-button" type="button" disabled>
-          ↻ 撮り直し
-        </button>
-
-        <button id="shutterButton" class="shutter-button" type="button">
-          <span>📷</span>
-        </button>
-
-        <label class="side-button file-side-button" for="imageFileInput">
-          🖼 画像を選択
-        </label>
-        <input id="imageFileInput" class="file-input" type="file" accept="image/*" capture="environment">
+        <input id="imageFileInput" type="file" accept="image/*" capture="environment" class="hidden">
       </section>
 
       <section class="memo-card">
-        <div class="memo-head">
-          <div>
-            <h2>画像メモ</h2>
-            <p>不具合箇所や気になる点を補足できます</p>
-          </div>
-          <span class="memo-icon">✎</span>
-        </div>
-
-        <textarea
-          id="imageMemoInput"
-          class="memo-input"
-          placeholder="例：右側ベルト端部の摩耗が気になる"
-        ></textarea>
+        <label for="imageMemoInput">画像メモ</label>
+        <textarea id="imageMemoInput" rows="4" placeholder="補足があれば入力してください。例：ベルト右側、擦れ跡あり"></textarea>
       </section>
 
-      <section class="mode-card">
-        <button id="cameraModeButton" class="mode-button active" type="button">
-          📷 撮影
-        </button>
-        <label class="mode-button" for="imageFileInput2">
-          📎 添付
-        </label>
-        <input id="imageFileInput2" class="file-input" type="file" accept="image/*">
+      <section class="tips-card">
+        <h2>撮影の目安</h2>
+        <ul>
+          <li>対象物の全体と、問題箇所が分かる角度で撮影してください。</li>
+          <li>暗い場合はライトを使用してください。</li>
+          <li>画像が不要な場合は、そのまま次へ進めます。</li>
+        </ul>
       </section>
 
       <div id="statusBox" class="status-box hidden"></div>
-    </section>
+    </main>
 
     <footer class="bottom-actions">
-      <button id="nextButton" class="primary-button" type="button" disabled>
-        <span class="arrow">➜</span>
-        この画像で次へ
-      </button>
-      <button id="skipButton" class="text-button" type="button">
-        あとで追加
-      </button>
+      <button id="nextButton" type="button" class="primary-button">この内容で次へ</button>
     </footer>
-  </main>
+  </div>
 
-  <script src="./capture.js?v=camera-large-001"></script>
+  <script src="./capture.js?v=full-001"></script>
 </body>
 </html>
