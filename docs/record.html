@@ -1,117 +1,76 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>録音 | 現場問題提起</title>
-  <link rel="stylesheet" href="./record.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>録音</title>
+  <link rel="stylesheet" href="./record.css?v=full-001">
 </head>
 <body>
-  <main class="screen">
+  <div class="app-shell">
     <header class="top-bar">
-      <button id="backButton" class="icon-button" type="button" aria-label="戻る">
-        ‹
-      </button>
-      <h1>録音</h1>
-      <button id="helpButton" class="help-button" type="button" aria-label="ヘルプ">
-        ?
-      </button>
+      <button id="backButton" type="button" class="top-button">戻る</button>
+      <div class="top-title">録音</div>
+      <button id="helpButton" type="button" class="top-button">ヘルプ</button>
     </header>
 
-    <section class="content">
-      <p class="lead">現場の状況を音声で記録</p>
+    <main class="content">
+      <section class="hero-card">
+        <div id="recordStatusBadge" class="status-badge status-ready">マイク準備中</div>
+        <h1>現場の状況を音声で記録</h1>
+        <p>異音・不具合・違和感などを、見たまま・聞いたまま話してください。</p>
+      </section>
 
-      <div id="micStatusChip" class="status-chip">
-        <span class="chip-icon">🎙</span>
-        <span id="micStatusText">マイク準備中</span>
-      </div>
-
-      <div class="timer-wrap">
+      <section class="recorder-card">
         <div id="timerText" class="timer">00:00</div>
-        <div id="limitText" class="limit">最大 02:00</div>
-      </div>
 
-      <section class="wave-card" aria-label="録音波形">
-        <canvas id="waveCanvas" width="640" height="180"></canvas>
-      </section>
-
-      <section class="record-control-area">
-        <button id="mainRecordButton" class="record-button idle" type="button" aria-label="録音開始">
-          <span id="recordIcon" class="record-icon"></span>
-        </button>
-        <div id="recordStateText" class="record-state">録音開始</div>
-      </section>
-
-      <div class="sub-controls">
-        <button id="pauseButton" class="sub-button" type="button" disabled>
-          <span id="pauseIcon">Ⅱ</span>
-          <span id="pauseText">一時停止</span>
-        </button>
-
-        <button id="resetButton" class="sub-button" type="button" disabled>
-          <span>↻</span>
-          <span>やり直し</span>
-        </button>
-      </div>
-
-      <section id="playbackCard" class="playback-card hidden">
-        <div class="card-title-row">
-          <div>
-            <h2>録音プレビュー</h2>
-            <p id="playbackStatus">録音済み・再生できます</p>
-          </div>
-          <button id="playButton" class="small-action" type="button">
-            再生
-          </button>
+        <div class="wave-wrap">
+          <canvas id="waveCanvas" width="600" height="150" aria-label="録音波形"></canvas>
         </div>
 
-        <audio id="audioPlayer" preload="metadata"></audio>
+        <div class="main-control">
+          <button id="recordButton" type="button" class="record-button" aria-label="録音開始">
+            <span id="recordIcon" class="record-icon"></span>
+          </button>
+          <div id="recordLabel" class="record-label">録音開始</div>
+        </div>
+
+        <div class="sub-controls">
+          <button id="pauseButton" type="button" class="secondary-button" disabled>一時停止</button>
+          <button id="resetButton" type="button" class="secondary-button" disabled>やり直し</button>
+        </div>
+
+        <div id="audioPreviewArea" class="audio-preview hidden">
+          <div class="audio-player">
+            <button id="playAudioButton" type="button" class="secondary-button compact" disabled>再生</button>
+            <span id="audioPlayStatus">未録音</span>
+          </div>
+          <audio id="audioPlayer" preload="metadata"></audio>
+        </div>
       </section>
 
       <section class="memo-card">
-        <div class="memo-head">
-          <div>
-            <h2>録音メモ</h2>
-            <p>異音・状況・気づきをひとこと残せます</p>
-          </div>
-          <span class="memo-icon">✎</span>
-        </div>
-
-        <textarea
-          id="recordMemoInput"
-          class="memo-input"
-          placeholder="例：ベルト右側から擦れるような音がする"
-        ></textarea>
+        <label for="audioMemoInput">録音メモ</label>
+        <textarea id="audioMemoInput" rows="4" placeholder="補足があれば入力してください。例：第二ライン右側、朝一から異音あり"></textarea>
       </section>
 
-      <section class="hint-card">
-        <div class="hint-row">
-          <span class="hint-icon">◷</span>
-          <span>推奨：30秒〜2分</span>
-        </div>
-        <div class="hint-line"></div>
-        <div class="hint-row">
-          <span class="hint-icon">🔊</span>
-          <span>周囲が静かな場所で録音してください</span>
-        </div>
+      <section class="tips-card">
+        <h2>録音の目安</h2>
+        <ul>
+          <li>30秒〜2分程度を目安にしてください。</li>
+          <li>対象物・発生場所・いつから起きたかを話すとAI整理しやすくなります。</li>
+          <li>録音中はカメラを停止するため、録音後に撮影へ進みます。</li>
+        </ul>
       </section>
 
-      <div id="statusBox" class="status-box">
-        GAS入口から開いてください。
-      </div>
-    </section>
+      <div id="statusBox" class="status-box hidden"></div>
+    </main>
 
     <footer class="bottom-actions">
-      <button id="nextButton" class="primary-button" type="button" disabled>
-        <span class="arrow">➜</span>
-        保存して次へ
-      </button>
-      <button id="skipButton" class="text-button" type="button">
-        あとで保存
-      </button>
+      <button id="nextButton" type="button" class="primary-button" disabled>保存して次へ</button>
     </footer>
-  </main>
+  </div>
 
-  <script src="./record.js"></script>
+  <script src="./record.js?v=full-001"></script>
 </body>
 </html>
