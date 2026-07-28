@@ -1,1284 +1,365 @@
-(() => {
-  const CONFIG = {
-    GOOGLE_CLIENT_ID: '866457692941-cro6etg365bkgq6m0qpor789677g11lq.apps.googleusercontent.com',
+'use strict';
 
-    // GAS WebアプリURL
-    GAS_WEB_APP_URL: 'https://script.google.com/a/macros/ecodesign-labo.jp/s/AKfycbzyU4I8u5csBb7qRIWvSGwPBrDcYAv0p6rPO6-ModBzPCtwavFeeSaGcOf-TwJeyb7BfQ/exec',
+const GAS_WEB_APP_URL = 'https://script.google.com/a/macros/ecodesign-labo.jp/s/AKfycbzyU4I8u5csBb7qRIWvSGwPBrDcYAv0p6rPO6-ModBzPCtwavFeeSaGcOf-TwJeyb7BfQ/exec';
+const DRIVE_ROOT_FOLDER_ID = '1oRhXuGn0YE1C-eKyG7MHNObLr1ficZ-p';
+const GOOGLE_CLIENT_ID = '866457692941-cro6etg365bkgq6m0qpor789677g11lq.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 
-    // 投稿用ルートフォルダ
-    DRIVE_ROOT_FOLDER_ID: '1oRhXuGn0YE1C-eKyG7MHNObLr1ficZ-p',
+const DRAFT_DB_NAME = 'fieldReportDraftDb';
+const DRAFT_STORE_NAME = 'drafts';
+const DRAFT_KEY = 'currentDraft';
 
-    // 既存の社内共有フォルダ直下に作成するため、権限不足を避ける目的でfull drive scopeを使用。
-    // 最小権限で検証する場合は https://www.googleapis.com/auth/drive.file に変更。
-    DRIVE_SCOPE: 'https://www.googleapis.com/auth/drive',
+let draft = null;
+let context = null;
+let driveAccessToken = '';
 
-    DB_NAME: 'field-report-draft-db',
-    DB_VERSION: 1,
-    STORE_NAME: 'draft',
+document.addEventListener('DOMContentLoaded', init);
 
-    REQUIRE_AUDIO: true,
-    REQUIRE_IMAGE: false,
+async function init() {
+  document.getElementById('backBtn').addEventListener('click', goBack);
+  document.getElementById('submitBtn').addEventListener('click', submitReport);
 
-    CONSENT_STORAGE_KEY: 'fieldReportDriveConsentGranted',
-    AUTH_TOKEN_STORAGE_KEY: 'fieldReportAuthToken'
-  };
+  try {
+    draft = await loadDraft();
+    if (!draft) throw new Error('下書きがありません。入力方法選択からやり直してください。');
 
-  const FALLBACK_DEPARTMENTS = [
-    '開発営業部',
-    '設計部',
-    '製造部',
-    '技術部',
-    '総務部',
-    '業務部',
-    '役員'
-  ];
+    const token = getToken();
+    if (!token) throw new Error('tokenがありません。GAS承認画面から開き直してください。');
+    sessionStorage.setItem('fieldReportToken', token);
 
-  const state = {
-    authToken: '',
-    appContext: null,
-    submitter: null,
-    departments: [],
+    context = draft.context || await fetchContextJsonp(token);
+    if (!context || !context.ok) throw new Error((context && context.error) || 'context取得に失敗しました。');
+    draft.context = context;
+    await saveDraft(draft);
 
-    db: null,
-    audioBlob: null,
-    audioMeta: null,
-    imageBlob: null,
-    imageMeta: null,
-    audioObjectUrl: '',
-    imageObjectUrl: '',
+    renderDepartmentOptions(context.departments || []);
+    renderSummary();
+    setStatus('内容を確認して投稿してください。');
+  } catch (err) {
+    setStatus(errorToString(err));
+    document.getElementById('submitBtn').disabled = true;
+  }
+}
 
-    tokenClient: null,
-    tokenResponse: null,
-    accessToken: '',
-    driveReady: false,
+function renderDepartmentOptions(departments) {
+  const select = document.getElementById('targetDepartment');
+  select.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '選択してください';
+  select.appendChild(placeholder);
 
-    isUploading: false,
-    uploadResult: null
-  };
+  departments.forEach(dep => {
+    const opt = document.createElement('option');
+    opt.value = dep;
+    opt.textContent = dep;
+    select.appendChild(opt);
+  });
 
-  const els = {};
+  if (draft.targetDepartment) select.value = draft.targetDepartment;
+}
 
-  document.addEventListener('DOMContentLoaded', init);
+function renderSummary() {
+  const summary = document.getElementById('summary');
+  const user = (context && (context.submitter || context.currentUser)) || {};
+  const inputMode = draft.inputMode === 'text' ? 'テキスト入力' : '録音';
+  const html = [];
 
-  async function init() {
-    collectElements();
-    bindEvents();
+  html.push('<h2>投稿者</h2>');
+  html.push('<div>氏名：' + escapeHtml(user.name || '-') + '</div>');
+  html.push('<div>所属：' + escapeHtml(user.department || '-') + '</div>');
+  html.push('<div>メール：' + escapeHtml(user.email || '-') + '</div>');
 
-    state.authToken = getAuthTokenFromUrlOrStorage();
+  html.push('<h2>入力方式</h2>');
+  html.push('<div>' + escapeHtml(inputMode) + '</div>');
 
-    if (!state.authToken) {
-      setFatalState('認証情報がありません。GAS入口から開き直してください。');
-      return;
-    }
-
-    setStatus('投稿データを確認しています...', 'info');
-
-    try {
-      await loadDraftData();
-      renderDraftSummary();
-    } catch (error) {
-      setFatalState('録音・画像データの読込に失敗しました。\n' + getErrorMessage(error));
-      return;
-    }
-
-    try {
-      await loadAppContext();
-      renderUserAndDepartments();
-    } catch (error) {
-      setStatus(
-        '従業員マスタ情報の取得に失敗しました。部署リストは予備設定で表示します。\n' +
-        getErrorMessage(error),
-        'warning'
-      );
-
-      state.submitter = {
-        name: '',
-        email: '',
-        department: '',
-        position: ''
-      };
-      state.departments = FALLBACK_DEPARTMENTS.slice();
-      renderUserAndDepartments();
-    }
-
-    try {
-      validateClientConfig();
-      await waitForGoogleIdentityServices();
-      setupTokenClient();
-      await checkDriveAuthorizationOnStartup();
-    } catch (error) {
-      state.driveReady = false;
-      showDrivePermissionRequired(
-        'Google Driveの承認状態を確認できませんでした。必要に応じて承認してください。'
-      );
-      setStatus(getErrorMessage(error), 'warning');
-    }
-
-    updateUploadButtonState();
+  if (draft.inputMode === 'text') {
+    html.push('<h2>入力本文</h2>');
+    html.push('<pre>' + escapeHtml((draft.text && draft.text.body) || '') + '</pre>');
+  } else {
+    html.push('<h2>録音</h2>');
+    html.push(draft.audio && draft.audio.blob ? '<audio controls src="' + URL.createObjectURL(draft.audio.blob) + '"></audio>' : '<div>録音データなし</div>');
   }
 
-  function collectElements() {
-    els.backButton = document.getElementById('backButton');
-
-    els.driveStatusBadge = document.getElementById('driveStatusBadge');
-    els.drivePermissionCard = document.getElementById('drivePermissionCard');
-    els.authorizeDriveButton = document.getElementById('authorizeDriveButton');
-
-    els.submitterName = document.getElementById('submitterName');
-    els.submitterDepartment = document.getElementById('submitterDepartment');
-    els.submitterEmail = document.getElementById('submitterEmail');
-    els.targetDepartmentSelect = document.getElementById('targetDepartmentSelect');
-
-    els.audioStatus = document.getElementById('audioStatus');
-    els.audioSummary = document.getElementById('audioSummary');
-    els.audioPlayer = document.getElementById('audioPlayer');
-    els.playAudioButton = document.getElementById('playAudioButton');
-    els.audioPlayStatus = document.getElementById('audioPlayStatus');
-    els.audioMemoText = document.getElementById('audioMemoText');
-
-    els.imageStatus = document.getElementById('imageStatus');
-    els.imageSummary = document.getElementById('imageSummary');
-    els.imagePreviewWrap = document.getElementById('imagePreviewWrap');
-    els.imagePreview = document.getElementById('imagePreview');
-    els.imageMemoText = document.getElementById('imageMemoText');
-
-    els.uploadButton = document.getElementById('uploadButton');
-    els.resultCard = document.getElementById('resultCard');
-    els.folderLink = document.getElementById('folderLink');
-    els.statusBox = document.getElementById('statusBox');
+  html.push('<h2>画像</h2>');
+  if (draft.image && draft.image.blob) {
+    html.push('<img class="preview" src="' + URL.createObjectURL(draft.image.blob) + '" alt="添付画像">');
+  } else {
+    html.push('<div>画像なし</div>');
   }
 
-  function bindEvents() {
-    els.backButton.addEventListener('click', () => {
-      location.href = './capture.html';
-    });
+  summary.innerHTML = html.join('');
+}
 
-    els.authorizeDriveButton.addEventListener('click', authorizeDriveByUserAction);
-    els.uploadButton.addEventListener('click', handleUploadClick);
-    els.playAudioButton.addEventListener('click', toggleAudioPlayback);
+async function submitReport() {
+  const submitBtn = document.getElementById('submitBtn');
+  submitBtn.disabled = true;
 
-    els.audioPlayer.addEventListener('ended', () => {
-      els.playAudioButton.textContent = '再生';
-      els.audioPlayStatus.textContent = '再生が終了しました';
-    });
+  try {
+    const targetDepartment = document.getElementById('targetDepartment').value;
+    if (!targetDepartment) throw new Error('対象部署を選択してください。');
 
-    els.targetDepartmentSelect.addEventListener('change', updateUploadButtonState);
-  }
+    draft.targetDepartment = targetDepartment;
+    draft.updatedAt = new Date().toISOString();
+    await saveDraft(draft);
 
-  function validateClientConfig() {
-    if (!CONFIG.GOOGLE_CLIENT_ID || CONFIG.GOOGLE_CLIENT_ID.includes('ここに')) {
-      throw new Error('confirm.js の GOOGLE_CLIENT_ID を設定してください。');
-    }
+    validateDraftForSubmit(draft);
 
-    if (!CONFIG.GAS_WEB_APP_URL || CONFIG.GAS_WEB_APP_URL.includes('ここに')) {
-      throw new Error('confirm.js の GAS_WEB_APP_URL を設定してください。');
-    }
+    setStatus('Google Drive認証を確認しています...');
+    driveAccessToken = await getDriveAccessToken();
 
-    if (!CONFIG.DRIVE_ROOT_FOLDER_ID) {
-      throw new Error('DRIVE_ROOT_FOLDER_ID が未設定です。');
-    }
-  }
-
-  function getAuthTokenFromUrlOrStorage() {
-    const url = new URL(location.href);
-    const tokenFromUrl = url.searchParams.get('token');
-
-    if (tokenFromUrl) {
-      sessionStorage.setItem(CONFIG.AUTH_TOKEN_STORAGE_KEY, tokenFromUrl);
-      sessionStorage.setItem('fieldReportToken', tokenFromUrl);
-
-      url.searchParams.delete('token');
-      history.replaceState({}, document.title, url.toString());
-
-      return tokenFromUrl;
-    }
-
-    return (
-      sessionStorage.getItem(CONFIG.AUTH_TOKEN_STORAGE_KEY) ||
-      sessionStorage.getItem('fieldReportToken') ||
-      ''
-    );
-  }
-
-  async function loadAppContext() {
-    const context = await fetchAppContextByJsonp(state.authToken);
-
-    if (!context || !context.ok) {
-      throw new Error(context && context.error ? context.error : 'アプリ情報を取得できませんでした。');
-    }
-
-    state.appContext = context;
-    state.submitter = context.submitter || {};
-    state.departments = Array.isArray(context.departments) && context.departments.length
-      ? context.departments
-      : FALLBACK_DEPARTMENTS.slice();
-
-    if (context.driveRootFolderId) {
-      CONFIG.DRIVE_ROOT_FOLDER_ID = context.driveRootFolderId;
-    }
-  }
-
-  function fetchAppContextByJsonp(token) {
-    return new Promise((resolve, reject) => {
-      const callbackName =
-        '__fieldReportContext_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-
-      const script = document.createElement('script');
-
-      const cleanup = () => {
-        try {
-          delete window[callbackName];
-        } catch (_) {
-          window[callbackName] = undefined;
-        }
-
-        if (script.parentNode) {
-          script.parentNode.removeChild(script);
-        }
-      };
-
-      const timer = window.setTimeout(() => {
-        cleanup();
-        reject(new Error('GASからアプリ情報を取得できませんでした。'));
-      }, 15000);
-
-      window[callbackName] = data => {
-        window.clearTimeout(timer);
-        cleanup();
-        resolve(data);
-      };
-
-      const url =
-        CONFIG.GAS_WEB_APP_URL +
-        '?action=context' +
-        '&token=' + encodeURIComponent(token) +
-        '&callback=' + encodeURIComponent(callbackName) +
-        '&t=' + Date.now();
-
-      script.onerror = () => {
-        window.clearTimeout(timer);
-        cleanup();
-        reject(new Error('GASアプリ情報取得リクエストに失敗しました。'));
-      };
-
-      script.src = url;
-      document.head.appendChild(script);
-    });
-  }
-
-  function renderUserAndDepartments() {
-    const submitter = state.submitter || {};
-
-    els.submitterName.textContent = submitter.name || '未取得';
-    els.submitterDepartment.textContent = submitter.department || '未取得';
-    els.submitterEmail.textContent = submitter.email || 'メール未取得';
-
-    const departments = state.departments && state.departments.length
-      ? state.departments
-      : FALLBACK_DEPARTMENTS;
-
-    els.targetDepartmentSelect.innerHTML = '';
-
-    const empty = document.createElement('option');
-    empty.value = '';
-    empty.textContent = '対象部署を選択';
-    els.targetDepartmentSelect.appendChild(empty);
-
-    departments.forEach(department => {
-      const option = document.createElement('option');
-      option.value = department;
-      option.textContent = department;
-      els.targetDepartmentSelect.appendChild(option);
-    });
-
-    if (submitter.department && departments.includes(submitter.department)) {
-      els.targetDepartmentSelect.value = submitter.department;
-    }
-
-    updateUploadButtonState();
-  }
-
-  async function loadDraftData() {
-    state.db = await openDb();
-
-    state.audioBlob = await getDraft('audioBlob');
-    state.audioMeta = await getDraft('audioMeta');
-
-    state.imageBlob = await getDraft('imageBlob');
-    state.imageMeta = await getDraft('imageMeta');
-  }
-
-  function renderDraftSummary() {
-    renderAudioSummary();
-    renderImageSummary();
-  }
-
-  function renderAudioSummary() {
-    if (!state.audioBlob) {
-      els.audioStatus.textContent = '未録音';
-      els.audioStatus.style.background = '#fee2e2';
-      els.audioStatus.style.color = '#991b1b';
-      els.audioSummary.textContent = '録音データがありません。録音画面に戻って録音してください。';
-      els.playAudioButton.disabled = true;
-      els.audioPlayStatus.textContent = '録音なし';
-      return;
-    }
-
-    if (state.audioObjectUrl) {
-      URL.revokeObjectURL(state.audioObjectUrl);
-    }
-
-    state.audioObjectUrl = URL.createObjectURL(state.audioBlob);
-    els.audioPlayer.src = state.audioObjectUrl;
-
-    els.audioStatus.textContent = '録音あり';
-    els.audioStatus.style.background = '#dcfce7';
-    els.audioStatus.style.color = '#166534';
-
-    const meta = state.audioMeta || {};
-    const lines = [
-      '音声サイズ：' + formatBytes(state.audioBlob.size),
-      '音声形式：' + (state.audioBlob.type || meta.mimeType || '不明')
-    ];
-
-    if (meta.durationSec) {
-      lines.push('録音時間：約' + Math.round(meta.durationSec) + '秒');
-    }
-
-    els.audioSummary.textContent = lines.join('\n');
-    els.playAudioButton.disabled = false;
-    els.audioPlayStatus.textContent = '再生できます';
-
-    const memo = meta.memo || meta.note || '';
-    els.audioMemoText.textContent = memo || 'なし';
-  }
-
-  function renderImageSummary() {
-    if (!state.imageBlob) {
-      els.imageStatus.textContent = CONFIG.REQUIRE_IMAGE ? '未添付' : '任意';
-      els.imageStatus.style.background = CONFIG.REQUIRE_IMAGE ? '#fee2e2' : '#f3f4f6';
-      els.imageStatus.style.color = CONFIG.REQUIRE_IMAGE ? '#991b1b' : '#374151';
-      els.imageSummary.textContent = CONFIG.REQUIRE_IMAGE
-        ? '画像データがありません。撮影・添付画面に戻って画像を追加してください。'
-        : '画像は添付されていません。画像なしでも投稿できます。';
-      els.imagePreviewWrap.classList.add('hidden');
-      return;
-    }
-
-    if (state.imageObjectUrl) {
-      URL.revokeObjectURL(state.imageObjectUrl);
-    }
-
-    state.imageObjectUrl = URL.createObjectURL(state.imageBlob);
-    els.imagePreview.src = state.imageObjectUrl;
-    els.imagePreviewWrap.classList.remove('hidden');
-
-    els.imageStatus.textContent = '画像あり';
-    els.imageStatus.style.background = '#dcfce7';
-    els.imageStatus.style.color = '#166534';
-
-    const meta = state.imageMeta || {};
-    const lines = [
-      '画像サイズ：' + formatBytes(state.imageBlob.size),
-      '画像形式：' + (state.imageBlob.type || meta.mimeType || '不明')
-    ];
-
-    if (meta.width && meta.height) {
-      lines.push('画像寸法：' + meta.width + ' × ' + meta.height);
-    }
-
-    els.imageSummary.textContent = lines.join('\n');
-
-    const memo = meta.memo || meta.note || '';
-    els.imageMemoText.textContent = memo || 'なし';
-  }
-
-  async function waitForGoogleIdentityServices() {
-    for (let i = 0; i < 80; i++) {
-      if (
-        window.google &&
-        google.accounts &&
-        google.accounts.oauth2 &&
-        typeof google.accounts.oauth2.initTokenClient === 'function'
-      ) {
-        return;
-      }
-
-      await sleep(100);
-    }
-
-    throw new Error('Google Identity Servicesを読み込めませんでした。通信環境を確認してください。');
-  }
-
-  function setupTokenClient() {
-    const submitter = state.submitter || {};
-
-    state.tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CONFIG.GOOGLE_CLIENT_ID,
-      scope: CONFIG.DRIVE_SCOPE,
-      login_hint: submitter.email || undefined,
-      callback: () => {}
-    });
-  }
-
-  async function checkDriveAuthorizationOnStartup() {
-    const hasConsent = localStorage.getItem(CONFIG.CONSENT_STORAGE_KEY) === '1';
-
-    if (!hasConsent) {
-      showDrivePermissionRequired('初回のみGoogle Driveの利用許可が必要です。');
-      return;
-    }
-
-    try {
-      setDriveStatus('Drive確認中', 'waiting');
-      setStatus('Google Driveの承認状態を確認しています...', 'info');
-
-      await requestDriveAccessToken({ prompt: 'none' });
-
-      if (!hasRequiredDriveScope()) {
-        throw new Error('Google Driveへの保存権限が不足しています。');
-      }
-
-      state.driveReady = true;
-      hideDrivePermissionCard();
-      setDriveStatus('Drive保存準備完了', 'ready');
-      setStatus('Google Driveへ保存できます。', 'success');
-
-    } catch (error) {
-      state.accessToken = '';
-      state.tokenResponse = null;
-      state.driveReady = false;
-
-      localStorage.removeItem(CONFIG.CONSENT_STORAGE_KEY);
-
-      showDrivePermissionRequired('Google Driveの再承認が必要です。');
-      setStatus(
-        'Google Driveの承認状態を確認できませんでした。\n「Google Driveを許可する」を押してください。',
-        'warning'
-      );
-    }
-  }
-
-  async function authorizeDriveByUserAction() {
-    try {
-      els.authorizeDriveButton.disabled = true;
-      els.authorizeDriveButton.textContent = '承認確認中...';
-
-      setStatus('Google Driveの利用許可を確認しています...', 'info');
-
-      await requestDriveAccessToken({ prompt: 'consent' });
-
-      if (!hasRequiredDriveScope()) {
-        throw new Error('Google Driveへの保存権限が許可されていません。');
-      }
-
-      localStorage.setItem(CONFIG.CONSENT_STORAGE_KEY, '1');
-
-      state.driveReady = true;
-      hideDrivePermissionCard();
-      setDriveStatus('Drive保存準備完了', 'ready');
-      setStatus('Google Driveへ保存できます。', 'success');
-
-    } catch (error) {
-      state.accessToken = '';
-      state.tokenResponse = null;
-      state.driveReady = false;
-
-      setDriveStatus('Drive未承認', 'error');
-      setStatus(
-        'Google Driveの利用許可を取得できませんでした。\n' + getErrorMessage(error),
-        'error'
-      );
-
-    } finally {
-      els.authorizeDriveButton.disabled = false;
-      els.authorizeDriveButton.textContent = 'Google Driveを許可する';
-      updateUploadButtonState();
-    }
-  }
-
-  function requestDriveAccessToken(options = {}) {
-    const prompt = options.prompt == null ? '' : String(options.prompt);
-
-    if (!state.tokenClient) {
-      throw new Error('Google認証クライアントが初期化されていません。');
-    }
-
-    return new Promise((resolve, reject) => {
-      state.tokenClient.callback = response => {
-        if (!response || response.error) {
-          const error = new Error(
-            response && response.error_description
-              ? response.error_description
-              : response && response.error
-                ? response.error
-                : 'Google Driveの認証に失敗しました。'
-          );
-
-          error.authResponse = response;
-          reject(error);
-          return;
-        }
-
-        state.accessToken = response.access_token || '';
-        state.tokenResponse = response;
-
-        if (!state.accessToken) {
-          reject(new Error('Google Driveアクセストークンを取得できませんでした。'));
-          return;
-        }
-
-        resolve(state.accessToken);
-      };
-
-      try {
-        state.tokenClient.requestAccessToken({ prompt });
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
-  function hasRequiredDriveScope() {
-    if (
-      window.google &&
-      google.accounts &&
-      google.accounts.oauth2 &&
-      typeof google.accounts.oauth2.hasGrantedAllScopes === 'function' &&
-      state.tokenResponse
-    ) {
-      return google.accounts.oauth2.hasGrantedAllScopes(
-        state.tokenResponse,
-        CONFIG.DRIVE_SCOPE
-      );
-    }
-
-    return true;
-  }
-
-  function showDrivePermissionRequired(message) {
-    state.driveReady = false;
-    els.drivePermissionCard.classList.remove('hidden');
-    setDriveStatus('Drive未承認', 'error');
-
-    if (message) {
-      setStatus(message, 'warning');
-    }
-
-    updateUploadButtonState();
-  }
-
-  function hideDrivePermissionCard() {
-    els.drivePermissionCard.classList.add('hidden');
-  }
-
-  function setDriveStatus(text, type) {
-    els.driveStatusBadge.textContent = text;
-
-    els.driveStatusBadge.classList.remove(
-      'status-waiting',
-      'status-ready',
-      'status-error',
-      'status-info'
-    );
-
-    if (type === 'ready') {
-      els.driveStatusBadge.classList.add('status-ready');
-    } else if (type === 'error') {
-      els.driveStatusBadge.classList.add('status-error');
-    } else if (type === 'info') {
-      els.driveStatusBadge.classList.add('status-info');
-    } else {
-      els.driveStatusBadge.classList.add('status-waiting');
-    }
-  }
-
-  async function handleUploadClick() {
-    if (state.isUploading) return;
-
-    if (!validateBeforeUpload()) return;
-
-    try {
-      state.isUploading = true;
-      updateUploadButtonState();
-
-      setStatus('Google Driveへ投稿しています...', 'info');
-
-      const result = await uploadReportWithReauthRetry();
-
-      state.uploadResult = result;
-      await putDraft('uploadResult', result);
-
-      renderUploadResult(result);
-
-      setStatus('投稿が完了しました。', 'success');
-
-    } catch (error) {
-      console.error(error);
-      setStatus('投稿に失敗しました。\n' + getErrorMessage(error), 'error');
-
-    } finally {
-      state.isUploading = false;
-      updateUploadButtonState();
-    }
-  }
-
-  function validateBeforeUpload() {
-    if (!state.audioBlob && CONFIG.REQUIRE_AUDIO) {
-      setStatus('録音データがありません。録音画面に戻って録音してください。', 'error');
-      return false;
-    }
-
-    if (!state.imageBlob && CONFIG.REQUIRE_IMAGE) {
-      setStatus('画像データがありません。撮影・添付画面に戻って画像を追加してください。', 'error');
-      return false;
-    }
-
-    if (!els.targetDepartmentSelect.value) {
-      setStatus('対象部署を選択してください。', 'error');
-      return false;
-    }
-
-    if (!state.driveReady) {
-      setStatus('Google Driveの利用許可が必要です。', 'error');
-      showDrivePermissionRequired('投稿前にGoogle Driveを許可してください。');
-      return false;
-    }
-
-    return true;
-  }
-
-  async function uploadReportWithReauthRetry() {
-    try {
-      await ensureDriveReadyBeforeUpload();
-      return await uploadReportCore();
-
-    } catch (error) {
-      if (!isAuthOrScopeError(error)) {
-        throw error;
-      }
-
-      localStorage.removeItem(CONFIG.CONSENT_STORAGE_KEY);
-
-      state.accessToken = '';
-      state.tokenResponse = null;
-      state.driveReady = false;
-
-      setDriveStatus('再承認が必要', 'error');
-      setStatus(
-        'Google Driveへの権限が不足している可能性があります。\n再度Google承認を行います。',
-        'warning'
-      );
-
-      await requestDriveAccessToken({ prompt: 'consent' });
-
-      if (!hasRequiredDriveScope()) {
-        throw new Error('Google Driveへの保存権限が許可されていません。');
-      }
-
-      localStorage.setItem(CONFIG.CONSENT_STORAGE_KEY, '1');
-
-      state.driveReady = true;
-      setDriveStatus('Drive保存準備完了', 'ready');
-
-      try {
-        return await uploadReportCore();
-      } catch (retryError) {
-        if (isAuthOrScopeError(retryError)) {
-          throw new Error(
-            'Google Driveへの保存権限を再承認しても投稿できませんでした。\n' +
-            '投稿データフォルダへの書き込み権限、またはOAuthスコープを確認してください。'
-          );
-        }
-
-        throw retryError;
-      }
-    }
-  }
-
-  async function ensureDriveReadyBeforeUpload() {
-    if (state.accessToken && state.driveReady) {
-      return;
-    }
-
-    const hasConsent = localStorage.getItem(CONFIG.CONSENT_STORAGE_KEY) === '1';
-
-    await requestDriveAccessToken({
-      prompt: hasConsent ? '' : 'consent'
-    });
-
-    if (!hasRequiredDriveScope()) {
-      throw new Error('Google Driveへの保存権限が不足しています。');
-    }
-
-    localStorage.setItem(CONFIG.CONSENT_STORAGE_KEY, '1');
-
-    state.driveReady = true;
-    setDriveStatus('Drive保存準備完了', 'ready');
-  }
-
-  async function uploadReportCore() {
-    const targetDepartmentName = els.targetDepartmentSelect.value;
     const reportId = buildReportId();
-    const timestampText = formatTimestampForTitle(new Date());
+    const folderName = reportId + '_' + sanitizeFileName(targetDepartment || '未指定');
 
-    const autoTitle = '現場投稿_' + timestampText + '_' + targetDepartmentName;
-    const folderName = reportId + '_' + sanitizeFileName(targetDepartmentName);
-
-    const folder = await createDriveFolder(folderName, CONFIG.DRIVE_ROOT_FOLDER_ID);
+    setStatus('投稿フォルダを作成しています...');
+    const folder = await createDriveFolder(folderName, DRIVE_ROOT_FOLDER_ID);
+    const folderId = folder.id;
+    const folderUrl = buildDriveFolderUrl(folderId);
 
     let audioFile = null;
     let imageFile = null;
 
-    if (state.audioBlob) {
-      const audioMime = state.audioBlob.type || 'audio/webm';
-      const audioExt = getExtensionFromMimeType(audioMime, 'webm');
-      const audioName = 'audio_' + reportId + '.' + audioExt;
-
-      audioFile = await uploadFileResumable({
-        name: audioName,
-        mimeType: audioMime,
-        blob: state.audioBlob,
-        parentFolderId: folder.id
+    if (draft.inputMode === 'audio') {
+      setStatus('音声データをアップロードしています...');
+      audioFile = await uploadDriveFile({
+        name: (draft.audio && draft.audio.fileName) || 'audio.mp4',
+        mimeType: (draft.audio && draft.audio.mimeType) || (draft.audio && draft.audio.blob && draft.audio.blob.type) || 'audio/mp4',
+        blob: draft.audio.blob,
+        parentFolderId: folderId
       });
     }
 
-    if (state.imageBlob) {
-      const imageMime = state.imageBlob.type || 'image/jpeg';
-      const imageExt = getExtensionFromMimeType(imageMime, 'jpg');
-      const imageName = 'image_' + reportId + '.' + imageExt;
-
-      imageFile = await uploadFileResumable({
-        name: imageName,
-        mimeType: imageMime,
-        blob: state.imageBlob,
-        parentFolderId: folder.id
+    if (draft.image && draft.image.blob) {
+      setStatus('画像データをアップロードしています...');
+      imageFile = await uploadDriveFile({
+        name: draft.image.fileName || 'image.jpg',
+        mimeType: draft.image.mimeType || draft.image.blob.type || 'image/jpeg',
+        blob: draft.image.blob,
+        parentFolderId: folderId
       });
     }
 
-    const metadata = buildReportMetadata({
+    const user = (context && (context.submitter || context.currentUser)) || {};
+    const metadata = buildMetadata({
       reportId,
-      autoTitle,
-      targetDepartmentName,
-      folder,
+      folderId,
+      folderUrl,
       audioFile,
-      imageFile
+      imageFile,
+      targetDepartment,
+      submitter: user
     });
 
-    const metadataBlob = new Blob(
-      [JSON.stringify(metadata, null, 2)],
-      { type: 'application/json' }
-    );
-
-    const metadataFile = await uploadFileResumable({
+    setStatus('metadata.jsonを保存しています...');
+    const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+    const metadataFile = await uploadDriveFile({
       name: 'metadata.json',
       mimeType: 'application/json',
       blob: metadataBlob,
-      parentFolderId: folder.id
+      parentFolderId: folderId
     });
 
-    // metadata.jsonアップロード後に、GAS通知用のmetadataへmetadataFile情報も補完する。
-    // Drive上のmetadata.json自体には自身のfileIdは含まれないが、GAS通知payloadには含める。
-    metadata.drive.metadataFileId = metadataFile.id || '';
+    metadata.drive.metadataFileId = metadataFile.id;
     metadata.drive.metadataFileName = metadataFile.name || 'metadata.json';
-    metadata.drive.metadataMimeType = metadataFile.mimeType || 'application/json';
-    metadata.drive.metadataFileUrl = metadataFile.webViewLink || buildDriveFileUrl(metadataFile.id);
+    metadata.drive.metadataFileUrl = buildDriveFileUrl(metadataFile.id);
 
-    const uploadResult = {
-      ...metadata,
-      metadataFile: {
-        id: metadataFile.id,
-        name: metadataFile.name,
-        mimeType: metadataFile.mimeType,
-        url: metadataFile.webViewLink || buildDriveFileUrl(metadataFile.id)
-      },
-      uploadedAt: new Date().toISOString()
-    };
-
-    await notifyGasUploadCompleted(uploadResult);
-
-    return uploadResult;
-  }
-
-  function buildReportMetadata(params) {
-    const submitter = state.submitter || {};
-    const audioMeta = state.audioMeta || {};
-    const imageMeta = state.imageMeta || {};
-    const createdAt = new Date().toISOString();
-
-    const folderId = params.folder.id || '';
-    const folderUrl = params.folder.webViewLink || buildDriveFolderUrl(folderId);
-
-    const audioId = params.audioFile ? params.audioFile.id || '' : '';
-    const audioName = params.audioFile ? params.audioFile.name || '' : '';
-    const audioMimeType = params.audioFile
-      ? params.audioFile.mimeType || state.audioBlob.type || ''
-      : '';
-    const audioUrl = params.audioFile
-      ? params.audioFile.webViewLink || buildDriveFileUrl(audioId)
-      : '';
-
-    const imageId = params.imageFile ? params.imageFile.id || '' : '';
-    const imageName = params.imageFile ? params.imageFile.name || '' : '';
-    const imageMimeType = params.imageFile
-      ? params.imageFile.mimeType || state.imageBlob.type || ''
-      : '';
-    const imageUrl = params.imageFile
-      ? params.imageFile.webViewLink || buildDriveFileUrl(imageId)
-      : '';
-
-    return {
-      schemaVersion: 2,
-      reportId: params.reportId,
-      autoTitle: params.autoTitle,
-      title: params.autoTitle,
-      userTitle: '',
-      status: 'uploaded',
-      createdAt: createdAt,
-      clientCreatedAt: createdAt,
-
-      submitter: {
-        name: submitter.name || '',
-        email: submitter.email || '',
-        masterEmail: submitter.masterEmail || '',
-        department: submitter.department || '',
-        role: submitter.role || submitter.position || '',
-        position: submitter.position || submitter.role || '',
-        employeeNo: submitter.employeeNo || submitter.no || '',
-        no: submitter.no || submitter.employeeNo || ''
-      },
-
-      targetDepartment: params.targetDepartmentName,
-      targetDepartmentName: params.targetDepartmentName,
-
-      // AI解析・GAS受付処理が参照する標準Drive情報。
-      drive: {
-        folderId: folderId,
-        folderName: params.folder.name || '',
-        folderUrl: folderUrl,
-
-        audioFileId: audioId,
-        audioFileName: audioName,
-        audioMimeType: audioMimeType,
-        audioFileUrl: audioUrl,
-
-        imageFileId: imageId,
-        imageFileName: imageName,
-        imageMimeType: imageMimeType,
-        imageFileUrl: imageUrl,
-
-        metadataFileId: '',
-        metadataFileName: 'metadata.json',
-        metadataMimeType: 'application/json',
-        metadataFileUrl: ''
-      },
-
-      // 旧形式互換: 既存の画面・処理が参照しても壊れないよう残す。
-      folder: {
-        id: folderId,
-        name: params.folder.name || '',
-        url: folderUrl
-      },
-
-      audio: params.audioFile
-        ? {
-            id: audioId,
-            name: audioName,
-            mimeType: audioMimeType,
-            url: audioUrl,
-            size: state.audioBlob ? state.audioBlob.size : 0,
-            memo: audioMeta.memo || audioMeta.note || '',
-            durationSec: audioMeta.durationSec || null
-          }
-        : null,
-
-      image: params.imageFile
-        ? {
-            id: imageId,
-            name: imageName,
-            mimeType: imageMimeType,
-            url: imageUrl,
-            size: state.imageBlob ? state.imageBlob.size : 0,
-            memo: imageMeta.memo || imageMeta.note || '',
-            width: imageMeta.width || null,
-            height: imageMeta.height || null
-          }
-        : null,
-
-      source: {
-        app: 'field-report',
-        page: 'confirm.html',
-        uploader: 'github-pages-drive-api'
-      }
-    };
-  }
-
-  async function createDriveFolder(name, parentFolderId) {
-    const metadata = {
-      name: name,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [parentFolderId]
-    };
-
-    const response = await fetch(
-      'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id,name,mimeType,webViewLink',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer ' + state.accessToken,
-          'Content-Type': 'application/json; charset=UTF-8'
-        },
-        body: JSON.stringify(metadata)
-      }
-    );
-
-    return parseDriveResponse(response, '投稿フォルダ作成');
-  }
-
-  async function uploadFileResumable(options) {
-    const { name, mimeType, blob, parentFolderId } = options;
-
-    const metadata = {
-      name: name,
-      mimeType: mimeType,
-      parents: [parentFolderId]
-    };
-
-    const initResponse = await fetch(
-      'https://www.googleapis.com/upload/drive/v3/files' +
-      '?uploadType=resumable' +
-      '&supportsAllDrives=true' +
-      '&fields=id,name,mimeType,webViewLink,size',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer ' + state.accessToken,
-          'Content-Type': 'application/json; charset=UTF-8',
-          'X-Upload-Content-Type': mimeType,
-          'X-Upload-Content-Length': String(blob.size)
-        },
-        body: JSON.stringify(metadata)
-      }
-    );
-
-    if (!initResponse.ok) {
-      await parseDriveResponse(initResponse, name + ' アップロード開始');
-    }
-
-    const uploadUrl = initResponse.headers.get('Location');
-
-    if (!uploadUrl) {
-      throw new Error(name + ' のアップロードURLを取得できませんでした。');
-    }
-
-    const endByte = blob.size - 1;
-
-    const uploadResponse = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': mimeType,
-        'Content-Range': 'bytes 0-' + endByte + '/' + blob.size
-      },
-      body: blob
-    });
-
-    return parseDriveResponse(uploadResponse, name + ' アップロード');
-  }
-
-  async function parseDriveResponse(response, label) {
-    const text = await response.text();
-
-    let data = {};
-    if (text) {
-      try {
-        data = JSON.parse(text);
-      } catch (_) {
-        data = { raw: text };
-      }
-    }
-
-    if (!response.ok) {
-      const firstError =
-        data &&
-        data.error &&
-        Array.isArray(data.error.errors) &&
-        data.error.errors[0]
-          ? data.error.errors[0]
-          : {};
-
-      const error = new Error(
-        data && data.error && data.error.message
-          ? label + 'に失敗しました。\n' + data.error.message
-          : label + 'に失敗しました。HTTP ' + response.status
-      );
-
-      error.status = response.status;
-      error.reason = firstError.reason || '';
-      error.domain = firstError.domain || '';
-      error.raw = data;
-
-      throw error;
-    }
-
-    return data;
-  }
-
-  function isAuthOrScopeError(error) {
-    const status = Number(error && error.status ? error.status : 0);
-    const reason = String(error && error.reason ? error.reason : '');
-    const message = String(error && error.message ? error.message : '').toLowerCase();
-
-    if (status === 401) return true;
-
-    if (status === 403) {
-      return (
-        reason === 'insufficientPermissions' ||
-        reason === 'insufficientFilePermissions' ||
-        reason === 'appNotAuthorizedToFile' ||
-        message.includes('insufficient') ||
-        message.includes('permission') ||
-        message.includes('not authorized')
-      );
-    }
-
-    return false;
-  }
-
-  async function notifyGasUploadCompleted(uploadResult) {
-    if (!CONFIG.GAS_WEB_APP_URL) return;
-
-    const metadata = uploadResult || {};
-    const drive = metadata.drive || {};
-
-    // GAS側 Code.gs の doPost(e) は JSON.parse(e.postData.contents) で受ける。
-    // Teams通知用のキーや通知API URLはGitHub側に置かず、GAS側で処理する。
-    const payload = {
+    setStatus('GASへ投稿完了を通知しています...');
+    await notifyUploadCompletedToGas({
       action: 'uploadCompleted',
-      token: state.authToken,
-
-      reportId: metadata.reportId || '',
-      createdAt: metadata.createdAt || metadata.clientCreatedAt || '',
-      targetDepartment: metadata.targetDepartment || metadata.targetDepartmentName || '',
-
-      folderId: drive.folderId || metadata.folder?.id || '',
-      folderUrl: drive.folderUrl || metadata.folder?.url || '',
-
-      audioFileId: drive.audioFileId || metadata.audio?.id || '',
-      audioFileUrl: drive.audioFileUrl || metadata.audio?.url || '',
-
-      imageFileId: drive.imageFileId || metadata.image?.id || '',
-      imageFileUrl: drive.imageFileUrl || metadata.image?.url || '',
-
-      metadataFileId: drive.metadataFileId || metadata.metadataFile?.id || '',
-      metadataFileUrl: drive.metadataFileUrl || metadata.metadataFile?.url || '',
-
-      metadata: metadata
-    };
-
-    await fetch(CONFIG.GAS_WEB_APP_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
-      },
-      body: JSON.stringify(payload)
+      token: getToken(),
+      reportId,
+      folderId,
+      folderUrl,
+      audioFileId: audioFile ? audioFile.id : '',
+      audioFileUrl: audioFile ? buildDriveFileUrl(audioFile.id) : '',
+      imageFileId: imageFile ? imageFile.id : '',
+      imageFileUrl: imageFile ? buildDriveFileUrl(imageFile.id) : '',
+      metadataFileId: metadataFile.id,
+      metadataFileUrl: buildDriveFileUrl(metadataFile.id),
+      targetDepartment,
+      metadata
     });
+
+    await clearDraft();
+    setStatus('投稿が完了しました。AI解析は順次実行されます。\n投稿ID: ' + reportId);
+  } catch (err) {
+    setStatus('投稿に失敗しました: ' + errorToString(err));
+    submitBtn.disabled = false;
   }
+}
 
-
-  function buildDriveFileUrl(fileId) {
-    if (!fileId) return '';
-    return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/view';
+function validateDraftForSubmit(draft) {
+  if (!draft.inputMode) throw new Error('入力方式が不明です。');
+  if (draft.inputMode === 'text') {
+    const text = draft.text && draft.text.body ? draft.text.body.trim() : '';
+    if (!text) throw new Error('テキスト本文がありません。');
+  } else if (draft.inputMode === 'audio') {
+    if (!draft.audio || !draft.audio.blob) throw new Error('録音データがありません。');
+  } else {
+    throw new Error('未対応の入力方式です: ' + draft.inputMode);
   }
+}
 
-  function buildDriveFolderUrl(folderId) {
-    if (!folderId) return '';
-    return 'https://drive.google.com/drive/folders/' + encodeURIComponent(folderId);
-  }
+function buildMetadata(args) {
+  const audioFile = args.audioFile;
+  const imageFile = args.imageFile;
+  const inputMode = draft.inputMode || 'audio';
 
-  function renderUploadResult(result) {
-    els.resultCard.classList.remove('hidden');
+  return {
+    version: 2,
+    reportId: args.reportId,
+    inputMode,
+    createdAt: draft.createdAt || new Date().toISOString(),
+    submittedAt: new Date().toISOString(),
+    targetDepartment: args.targetDepartment,
+    autoTitle: '現場投稿_' + args.reportId,
+    submitter: {
+      name: args.submitter.name || '',
+      email: args.submitter.email || '',
+      department: args.submitter.department || '',
+      role: args.submitter.role || ''
+    },
+    text: inputMode === 'text' ? {
+      body: (draft.text && draft.text.body) || '',
+      createdAt: (draft.text && draft.text.createdAt) || '',
+      updatedAt: (draft.text && draft.text.updatedAt) || ''
+    } : null,
+    audio: inputMode === 'audio' ? {
+      fileName: (draft.audio && draft.audio.fileName) || '',
+      mimeType: (draft.audio && draft.audio.mimeType) || '',
+      durationSec: (draft.audio && draft.audio.durationSec) || '',
+      recordedAt: (draft.audio && draft.audio.recordedAt) || ''
+    } : null,
+    image: draft.image ? {
+      fileName: draft.image.fileName || '',
+      mimeType: draft.image.mimeType || '',
+      capturedAt: draft.image.capturedAt || ''
+    } : null,
+    drive: {
+      folderId: args.folderId,
+      folderUrl: args.folderUrl,
+      audioFileId: audioFile ? audioFile.id : '',
+      audioFileName: audioFile ? audioFile.name : '',
+      audioMimeType: audioFile ? audioFile.mimeType : '',
+      audioFileUrl: audioFile ? buildDriveFileUrl(audioFile.id) : '',
+      imageFileId: imageFile ? imageFile.id : '',
+      imageFileName: imageFile ? imageFile.name : '',
+      imageMimeType: imageFile ? imageFile.mimeType : '',
+      imageFileUrl: imageFile ? buildDriveFileUrl(imageFile.id) : '',
+      metadataFileId: '',
+      metadataFileName: 'metadata.json',
+      metadataFileUrl: ''
+    },
+    status: 'uploaded'
+  };
+}
 
-    if (result.folder && result.folder.url) {
-      els.folderLink.href = result.folder.url;
-      els.folderLink.textContent = '投稿フォルダを開く';
-    } else {
-      els.folderLink.href = '#';
-      els.folderLink.textContent = '投稿フォルダURLなし';
-    }
-
-    window.scrollTo({
-      top: document.body.scrollHeight,
-      behavior: 'smooth'
-    });
-  }
-
-  function toggleAudioPlayback() {
-    if (!state.audioBlob) return;
-
-    if (els.audioPlayer.paused) {
-      els.audioPlayer.play()
-        .then(() => {
-          els.playAudioButton.textContent = '停止';
-          els.audioPlayStatus.textContent = '再生中';
-        })
-        .catch(error => {
-          setStatus('音声を再生できませんでした。\n' + getErrorMessage(error), 'error');
-        });
-    } else {
-      els.audioPlayer.pause();
-      els.audioPlayer.currentTime = 0;
-      els.playAudioButton.textContent = '再生';
-      els.audioPlayStatus.textContent = '停止しました';
-    }
-  }
-
-  function updateUploadButtonState() {
-    const hasAudio = Boolean(state.audioBlob);
-    const hasImage = Boolean(state.imageBlob);
-    const hasDepartment = Boolean(els.targetDepartmentSelect.value);
-
-    const canUpload =
-      !state.isUploading &&
-      state.driveReady &&
-      hasDepartment &&
-      (!CONFIG.REQUIRE_AUDIO || hasAudio) &&
-      (!CONFIG.REQUIRE_IMAGE || hasImage);
-
-    els.uploadButton.disabled = !canUpload;
-
-    if (state.isUploading) {
-      els.uploadButton.textContent = '投稿中...';
-    } else {
-      els.uploadButton.textContent = 'Google Driveへ投稿';
-    }
-  }
-
-  function setFatalState(message) {
-    setStatus(message, 'error');
-    setDriveStatus('利用不可', 'error');
-    els.uploadButton.disabled = true;
-  }
-
-  function setStatus(message, type = 'info') {
-    if (!message) {
-      els.statusBox.classList.add('hidden');
-      els.statusBox.textContent = '';
+function getDriveAccessToken() {
+  return new Promise((resolve, reject) => {
+    if (!window.google || !google.accounts || !google.accounts.oauth2) {
+      reject(new Error('Google Identity Servicesが読み込まれていません。'));
       return;
     }
-
-    els.statusBox.classList.remove('hidden', 'info', 'success', 'error', 'warning');
-    els.statusBox.classList.add(type);
-    els.statusBox.textContent = message;
-  }
-
-  function openDb() {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
-
-      req.onupgradeneeded = event => {
-        const db = event.target.result;
-
-        if (!db.objectStoreNames.contains(CONFIG.STORE_NAME)) {
-          db.createObjectStore(CONFIG.STORE_NAME);
-        }
-      };
-
-      req.onsuccess = event => resolve(event.target.result);
-      req.onerror = event => reject(event.target.error);
+    if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.indexOf('YOUR_') === 0) {
+      reject(new Error('confirm.js の GOOGLE_CLIENT_ID を設定してください。'));
+      return;
+    }
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      callback: response => {
+        if (response && response.access_token) resolve(response.access_token);
+        else reject(new Error('Drive APIのアクセストークン取得に失敗しました。'));
+      },
+      error_callback: err => reject(new Error('Drive認証に失敗しました: ' + JSON.stringify(err || {})))
     });
-  }
+    client.requestAccessToken({ prompt: '' });
+  });
+}
 
-  function getDraft(key) {
-    return new Promise((resolve, reject) => {
-      const tx = state.db.transaction(CONFIG.STORE_NAME, 'readonly');
-      const store = tx.objectStore(CONFIG.STORE_NAME);
-      const req = store.get(key);
+async function createDriveFolder(name, parentFolderId) {
+  const res = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,webViewLink&supportsAllDrives=true', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + driveAccessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] })
+  });
+  if (!res.ok) throw new Error('Driveフォルダ作成失敗 HTTP ' + res.status + ': ' + await res.text());
+  return res.json();
+}
 
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = event => reject(event.target.error);
-    });
-  }
+async function uploadDriveFile({ name, mimeType, blob, parentFolderId }) {
+  const boundary = '-------fieldReportBoundary' + Date.now();
+  const metadata = { name, mimeType, parents: [parentFolderId] };
+  const body = new Blob([
+    '--' + boundary + '\r\n',
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+    JSON.stringify(metadata),
+    '\r\n--' + boundary + '\r\n',
+    'Content-Type: ' + mimeType + '\r\n\r\n',
+    blob,
+    '\r\n--' + boundary + '--'
+  ], { type: 'multipart/related; boundary=' + boundary });
 
-  function putDraft(key, value) {
-    return new Promise((resolve, reject) => {
-      const tx = state.db.transaction(CONFIG.STORE_NAME, 'readwrite');
-      const store = tx.objectStore(CONFIG.STORE_NAME);
-      const req = store.put(value, key);
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,webViewLink&supportsAllDrives=true', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + driveAccessToken },
+    body
+  });
+  if (!res.ok) throw new Error('Driveファイルアップロード失敗 HTTP ' + res.status + ': ' + await res.text());
+  return res.json();
+}
 
-      req.onsuccess = () => resolve();
-      req.onerror = event => reject(event.target.error);
-    });
-  }
+async function notifyUploadCompletedToGas(payload) {
+  await fetch(GAS_WEB_APP_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  });
+}
 
-  function buildReportId() {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = pad2(d.getMonth() + 1);
-    const day = pad2(d.getDate());
-    const hh = pad2(d.getHours());
-    const mm = pad2(d.getMinutes());
-    const ss = pad2(d.getSeconds());
-    const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+function fetchContextJsonp(token) {
+  return new Promise((resolve, reject) => {
+    const callbackName = 'fieldReportContext_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+    const script = document.createElement('script');
+    const timeout = setTimeout(() => { cleanup(); reject(new Error('context取得がタイムアウトしました。')); }, 15000);
+    window[callbackName] = data => { clearTimeout(timeout); cleanup(); resolve(data); };
+    script.onerror = () => { clearTimeout(timeout); cleanup(); reject(new Error('context取得用スクリプトの読み込みに失敗しました。')); };
+    const url = new URL(GAS_WEB_APP_URL);
+    url.searchParams.set('action', 'context');
+    url.searchParams.set('token', token);
+    url.searchParams.set('callback', callbackName);
+    script.src = url.toString();
+    document.body.appendChild(script);
+    function cleanup() { try { delete window[callbackName]; } catch (e) { window[callbackName] = undefined; } if (script.parentNode) script.parentNode.removeChild(script); }
+  });
+}
 
-    return 'RPT-' + y + m + day + '-' + hh + mm + ss + '-' + rand;
-  }
+function goBack() {
+  const token = getToken();
+  const target = draft && draft.inputMode === 'text' ? 'capture.html' : 'capture.html';
+  location.href = target + (token ? '?token=' + encodeURIComponent(token) : '');
+}
 
-  function formatTimestampForTitle(date) {
-    return (
-      date.getFullYear() +
-      pad2(date.getMonth() + 1) +
-      pad2(date.getDate()) +
-      '_' +
-      pad2(date.getHours()) +
-      pad2(date.getMinutes()) +
-      pad2(date.getSeconds())
-    );
-  }
-
-  function sanitizeFileName(value) {
-    return String(value || '')
-      .replace(/[\\/:*?"<>|]/g, '_')
-      .replace(/\s+/g, '_')
-      .slice(0, 80);
-  }
-
-  function getExtensionFromMimeType(mimeType, fallback) {
-    const map = {
-      'audio/webm': 'webm',
-      'audio/mp4': 'mp4',
-      'audio/aac': 'aac',
-      'audio/mpeg': 'mp3',
-      'image/jpeg': 'jpg',
-      'image/png': 'png',
-      'image/webp': 'webp',
-      'application/json': 'json'
-    };
-
-    return map[mimeType] || fallback;
-  }
-
-  function formatBytes(bytes) {
-    const n = Number(bytes || 0);
-
-    if (n < 1024) return n + ' B';
-    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-
-    return (n / 1024 / 1024).toFixed(1) + ' MB';
-  }
-
-  function getErrorMessage(error) {
-    if (!error) return '不明なエラーです。';
-    if (error.message) return String(error.message);
-    return String(error);
-  }
-
-  function pad2(n) {
-    return String(n).padStart(2, '0');
-  }
-
-  function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-})();
-
+function buildReportId() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `RPT-${y}${m}${d}-${hh}${mm}${ss}-${rand}`;
+}
+function buildDriveFileUrl(fileId) { return fileId ? `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view` : ''; }
+function buildDriveFolderUrl(folderId) { return folderId ? `https://drive.google.com/drive/folders/${encodeURIComponent(folderId)}` : ''; }
+function sanitizeFileName(value) { return String(value || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80); }
+function getToken() { const params = new URLSearchParams(location.search); return params.get('token') || sessionStorage.getItem('fieldReportToken') || (draft && draft.token) || ''; }
+function setStatus(text) { document.getElementById('status').textContent = text || ''; }
+function loadDraft() { return openDb().then(db => new Promise((resolve, reject) => { const tx = db.transaction(DRAFT_STORE_NAME, 'readonly'); const req = tx.objectStore(DRAFT_STORE_NAME).get(DRAFT_KEY); req.onsuccess = () => resolve(req.result || null); req.onerror = () => reject(req.error); })); }
+function saveDraft(value) { return openDb().then(db => new Promise((resolve, reject) => { const tx = db.transaction(DRAFT_STORE_NAME, 'readwrite'); tx.objectStore(DRAFT_STORE_NAME).put(value, DRAFT_KEY); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); })); }
+function clearDraft() { return openDb().then(db => new Promise((resolve, reject) => { const tx = db.transaction(DRAFT_STORE_NAME, 'readwrite'); tx.objectStore(DRAFT_STORE_NAME).delete(DRAFT_KEY); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); })); }
+function openDb() { return new Promise((resolve, reject) => { const req = indexedDB.open(DRAFT_DB_NAME, 1); req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(DRAFT_STORE_NAME)) db.createObjectStore(DRAFT_STORE_NAME); }; req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); }); }
+function escapeHtml(value) { return String(value || '').replace(/[&<>'"]/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[s])); }
+function errorToString(err) { return err && (err.message || err.stack) ? (err.message || err.stack) : String(err); }
