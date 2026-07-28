@@ -1,84 +1,37 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>撮影・添付</title>
-  <link rel="stylesheet" href="./capture.css?v=full-001">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>画像添付 | 現場問題提起ツール</title>
+  <link rel="stylesheet" href="capture.css">
 </head>
 <body>
-  <div class="app-shell">
-    <header class="top-bar">
-      <button id="backButton" type="button" class="top-button">戻る</button>
-      <div class="top-title">撮影・添付</div>
-      <button id="helpButton" type="button" class="top-button">ヘルプ</button>
-    </header>
+  <main class="app-shell">
+    <section class="card">
+      <p class="eyebrow">現場問題提起ツール</p>
+      <h1>画像を添付</h1>
+      <p class="lead">現場写真を撮影、または画像ファイルを選択してください。画像なしでも投稿できます。</p>
 
-    <main class="content">
-      <section class="hero-card">
-        <div id="cameraStatusBadge" class="status-badge status-ready">カメラ準備中</div>
-        <h1>現場の状況を写真で記録</h1>
-        <p>対象が分かるように撮影してください。画像なしでも次へ進めます。</p>
-      </section>
+      <video id="video" playsinline autoplay muted hidden></video>
+      <canvas id="canvas" hidden></canvas>
+      <img id="preview" class="preview" alt="添付画像プレビュー" hidden>
 
-      <section class="camera-card">
-        <div class="preview-card">
-          <video id="cameraVideo" autoplay playsinline muted></video>
-          <img id="imagePreview" alt="撮影画像プレビュー" class="hidden">
-          <div id="emptyPreview" class="empty-preview">カメラを起動、または画像を選択してください</div>
+      <div class="actions grid">
+        <button id="startCameraBtn" class="btn secondary" type="button">カメラ起動</button>
+        <button id="captureBtn" class="btn primary" type="button" disabled>撮影</button>
+        <label class="btn secondary file-label">画像選択<input id="fileInput" type="file" accept="image/*" hidden></label>
+        <button id="clearBtn" class="btn secondary" type="button">画像クリア</button>
+      </div>
 
-          <div id="gridOverlay" class="grid-overlay hidden"></div>
+      <div class="actions">
+        <button id="backBtn" class="btn secondary" type="button">戻る</button>
+        <button id="nextBtn" class="btn primary" type="button">確認へ</button>
+      </div>
 
-          <div class="preview-top">
-            <button id="gridToggleButton" type="button" class="top-badge">グリッド OFF</button>
-            <span id="zoomBadge" class="top-badge hidden">1.0x</span>
-          </div>
-        </div>
-
-        <div id="zoomControl" class="zoom-control hidden">
-          <div class="zoom-head">
-            <span>倍率</span>
-            <span id="zoomValueText">1.0x</span>
-          </div>
-          <input id="zoomRange" class="zoom-range" type="range" min="1" max="1" step="0.1" value="1">
-        </div>
-
-        <div class="capture-controls">
-          <button id="startCameraButton" type="button" class="secondary-button">カメラ起動</button>
-          <button id="captureButton" type="button" class="shutter-button" disabled aria-label="撮影"></button>
-          <button id="fileSelectButton" type="button" class="secondary-button">画像を選択</button>
-        </div>
-
-        <div class="sub-controls">
-          <button id="resetImageButton" type="button" class="secondary-button" disabled>画像を削除</button>
-          <button id="stopCameraButton" type="button" class="secondary-button" disabled>カメラ停止</button>
-        </div>
-
-        <input id="imageFileInput" type="file" accept="image/*" capture="environment" class="hidden">
-      </section>
-
-      <section class="memo-card">
-        <label for="imageMemoInput">画像メモ</label>
-        <textarea id="imageMemoInput" rows="4" placeholder="補足があれば入力してください。例：ベルト右側、擦れ跡あり"></textarea>
-      </section>
-
-      <section class="tips-card">
-        <h2>撮影の目安</h2>
-        <ul>
-          <li>対象物の全体と、問題箇所が分かる角度で撮影してください。</li>
-          <li>暗い場合はライトを使用してください。</li>
-          <li>画像が不要な場合は、そのまま次へ進めます。</li>
-        </ul>
-      </section>
-
-      <div id="statusBox" class="status-box hidden"></div>
-    </main>
-
-    <footer class="bottom-actions">
-      <button id="nextButton" type="button" class="primary-button">この内容で次へ</button>
-    </footer>
-  </div>
-
-  <script src="./capture.js?v=full-001"></script>
+      <p id="status" class="status"></p>
+    </section>
+  </main>
+  <script src="capture.js"></script>
 </body>
 </html>
