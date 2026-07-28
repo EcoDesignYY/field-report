@@ -1,101 +1,190 @@
-'use strict';
+(() => {
+  'use strict';
 
-const DRAFT_DB_NAME = 'fieldReportDraftDb';
-const DRAFT_STORE_NAME = 'drafts';
-const DRAFT_KEY = 'currentDraft';
+  const CONFIG = {
+    DB_NAME: 'field-report-draft-db',
+    DB_VERSION: 1,
+    STORE_NAME: 'draft',
+    AUTH_TOKEN_STORAGE_KEY: 'fieldReportAuthToken',
+    MIN_LENGTH: 10,
+    MAX_LENGTH: 4000,
+    NEXT_PAGE_URL: './capture.html',
+    PREVIOUS_PAGE_URL: './input.html'
+  };
 
-let draft = null;
+  const state = {
+    authToken: '',
+    db: null,
+    isSaving: false
+  };
 
-document.addEventListener('DOMContentLoaded', init);
+  const elements = {};
 
-async function init() {
-  const textarea = document.getElementById('problemText');
-  textarea.addEventListener('input', updateCount);
-  document.getElementById('backBtn').addEventListener('click', goBack);
-  document.getElementById('nextBtn').addEventListener('click', goNext);
+  document.addEventListener('DOMContentLoaded', initializePage);
 
-  try {
-    draft = await loadDraft();
-    if (!draft) throw new Error('下書きがありません。入力方法選択からやり直してください。');
-    draft.inputMode = 'text';
+  async function initializePage() {
+    collectElements();
+    bindEvents();
 
-    if (draft.text && draft.text.body) textarea.value = draft.text.body;
-    updateCount();
-  } catch (err) {
-    setStatus(errorToString(err));
-    document.getElementById('nextBtn').disabled = true;
-  }
-}
-
-async function goBack() {
-  const token = getToken();
-  location.href = 'input.html' + (token ? '?token=' + encodeURIComponent(token) : '');
-}
-
-async function goNext() {
-  try {
-    const body = document.getElementById('problemText').value.trim();
-    if (!body) {
-      setStatus('問題内容を入力してください。');
+    state.authToken = getStoredAuthToken();
+    if (!state.authToken) {
+      showFatalError('認証情報がありません。GAS入口から開き直してください。');
       return;
     }
 
-    draft.inputMode = 'text';
-    draft.text = {
-      body,
-      createdAt: draft.text && draft.text.createdAt ? draft.text.createdAt : new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    draft.audio = null;
-    draft.updatedAt = new Date().toISOString();
-
-    await saveDraft(draft);
-    const token = getToken();
-    location.href = 'capture.html' + (token ? '?token=' + encodeURIComponent(token) : '');
-  } catch (err) {
-    setStatus('保存に失敗しました: ' + errorToString(err));
+    try {
+      state.db = await openDatabase();
+      await putDraft('inputMode', 'text');
+      await deleteDraft('audioBlob');
+      await deleteDraft('audioMeta');
+      await restoreExistingText();
+      updateInputState();
+    } catch (error) {
+      showFatalError('入力画面の初期化に失敗しました。\n' + getErrorMessage(error));
+    }
   }
-}
 
-function updateCount() {
-  document.getElementById('charCount').textContent = String(document.getElementById('problemText').value.length);
-}
+  function collectElements() {
+    elements.backButton = document.getElementById('backButton');
+    elements.helpButton = document.getElementById('helpButton');
+    elements.inputStatusBadge = document.getElementById('inputStatusBadge');
+    elements.textBodyInput = document.getElementById('textBodyInput');
+    elements.characterCount = document.getElementById('characterCount');
+    elements.nextButton = document.getElementById('nextButton');
+    elements.statusBox = document.getElementById('statusBox');
+  }
 
-function getToken() {
-  const params = new URLSearchParams(location.search);
-  return params.get('token') || sessionStorage.getItem('fieldReportToken') || (draft && draft.token) || '';
-}
+  function bindEvents() {
+    elements.backButton.addEventListener('click', () => {
+      location.href = CONFIG.PREVIOUS_PAGE_URL;
+    });
 
-function setStatus(text) { document.getElementById('status').textContent = text || ''; }
+    elements.helpButton.addEventListener('click', () => {
+      showStatus(
+        '見たこと・聞いたこと・発生場所・発生時期を分かる範囲で入力してください。推測は「〜と思う」のように区別してください。',
+        'info'
+      );
+    });
 
-function loadDraft() {
-  return openDb().then(db => new Promise((resolve, reject) => {
-    const tx = db.transaction(DRAFT_STORE_NAME, 'readonly');
-    const req = tx.objectStore(DRAFT_STORE_NAME).get(DRAFT_KEY);
-    req.onsuccess = () => resolve(req.result || null);
-    req.onerror = () => reject(req.error);
-  }));
-}
+    elements.textBodyInput.addEventListener('input', updateInputState);
+    elements.nextButton.addEventListener('click', saveAndGoNext);
+  }
 
-function saveDraft(value) {
-  return openDb().then(db => new Promise((resolve, reject) => {
-    const tx = db.transaction(DRAFT_STORE_NAME, 'readwrite');
-    tx.objectStore(DRAFT_STORE_NAME).put(value, DRAFT_KEY);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  }));
-}
+  async function restoreExistingText() {
+    const existingText = await getDraft('textBody');
+    if (existingText) {
+      elements.textBodyInput.value = String(existingText).slice(0, CONFIG.MAX_LENGTH);
+    }
+  }
 
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DRAFT_DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(DRAFT_STORE_NAME)) db.createObjectStore(DRAFT_STORE_NAME);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
+  function updateInputState() {
+    const length = elements.textBodyInput.value.trim().length;
+    elements.characterCount.textContent = length + ' / ' + CONFIG.MAX_LENGTH;
+    elements.nextButton.disabled = state.isSaving || length < CONFIG.MIN_LENGTH;
 
-function errorToString(err) { return err && (err.message || err.stack) ? (err.message || err.stack) : String(err); }
+    if (length >= CONFIG.MIN_LENGTH) {
+      setInputStatus('入力内容を保存できます', 'ready');
+    } else {
+      setInputStatus('あと' + (CONFIG.MIN_LENGTH - length) + '文字入力してください', 'ready');
+    }
+  }
+
+  async function saveAndGoNext() {
+    const body = elements.textBodyInput.value.trim();
+
+    if (body.length < CONFIG.MIN_LENGTH) {
+      showStatus(CONFIG.MIN_LENGTH + '文字以上入力してください。', 'error');
+      return;
+    }
+
+    state.isSaving = true;
+    updateInputState();
+    showStatus('入力内容を保存しています...', 'info');
+
+    try {
+      await putDraft('inputMode', 'text');
+      await putDraft('textBody', body);
+      await putDraft('textMeta', {
+        createdAt: new Date().toISOString(),
+        characterCount: body.length
+      });
+
+      location.href = CONFIG.NEXT_PAGE_URL;
+    } catch (error) {
+      state.isSaving = false;
+      updateInputState();
+      showStatus('入力内容を保存できませんでした。\n' + getErrorMessage(error), 'error');
+    }
+  }
+
+  function setInputStatus(text, type) {
+    elements.inputStatusBadge.textContent = text;
+    elements.inputStatusBadge.classList.remove('status-ready', 'status-error');
+    elements.inputStatusBadge.classList.add(type === 'error' ? 'status-error' : 'status-ready');
+  }
+
+  function showFatalError(message) {
+    setInputStatus('利用不可', 'error');
+    elements.textBodyInput.disabled = true;
+    elements.nextButton.disabled = true;
+    showStatus(message, 'error');
+  }
+
+  function showStatus(message, type) {
+    if (!message) {
+      elements.statusBox.className = 'status-box hidden';
+      elements.statusBox.textContent = '';
+      return;
+    }
+
+    elements.statusBox.className = 'status-box ' + (type || 'info');
+    elements.statusBox.textContent = message;
+  }
+
+  function getStoredAuthToken() {
+    return sessionStorage.getItem(CONFIG.AUTH_TOKEN_STORAGE_KEY)
+      || sessionStorage.getItem('fieldReportToken')
+      || '';
+  }
+
+  function openDatabase() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
+
+      request.onupgradeneeded = event => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(CONFIG.STORE_NAME)) {
+          db.createObjectStore(CONFIG.STORE_NAME);
+        }
+      };
+
+      request.onsuccess = event => resolve(event.target.result);
+      request.onerror = event => reject(event.target.error);
+    });
+  }
+
+  function getDraft(key) {
+    return runStoreRequest('readonly', store => store.get(key));
+  }
+
+  function putDraft(key, value) {
+    return runStoreRequest('readwrite', store => store.put(value, key));
+  }
+
+  function deleteDraft(key) {
+    return runStoreRequest('readwrite', store => store.delete(key));
+  }
+
+  function runStoreRequest(mode, requestFactory) {
+    return new Promise((resolve, reject) => {
+      const transaction = state.db.transaction(CONFIG.STORE_NAME, mode);
+      const request = requestFactory(transaction.objectStore(CONFIG.STORE_NAME));
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = event => reject(event.target.error);
+    });
+  }
+
+  function getErrorMessage(error) {
+    return error && error.message ? String(error.message) : String(error || '不明なエラーです。');
+  }
+})();
