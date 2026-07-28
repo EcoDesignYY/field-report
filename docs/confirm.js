@@ -777,13 +777,20 @@
       parentFolderId: folder.id
     });
 
+    // metadata.jsonアップロード後に、GAS通知用のmetadataへmetadataFile情報も補完する。
+    // Drive上のmetadata.json自体には自身のfileIdは含まれないが、GAS通知payloadには含める。
+    metadata.drive.metadataFileId = metadataFile.id || '';
+    metadata.drive.metadataFileName = metadataFile.name || 'metadata.json';
+    metadata.drive.metadataMimeType = metadataFile.mimeType || 'application/json';
+    metadata.drive.metadataFileUrl = metadataFile.webViewLink || buildDriveFileUrl(metadataFile.id);
+
     const uploadResult = {
       ...metadata,
       metadataFile: {
         id: metadataFile.id,
         name: metadataFile.name,
         mimeType: metadataFile.mimeType,
-        url: metadataFile.webViewLink || ''
+        url: metadataFile.webViewLink || buildDriveFileUrl(metadataFile.id)
       },
       uploadedAt: new Date().toISOString()
     };
@@ -797,39 +804,88 @@
     const submitter = state.submitter || {};
     const audioMeta = state.audioMeta || {};
     const imageMeta = state.imageMeta || {};
+    const createdAt = new Date().toISOString();
+
+    const folderId = params.folder.id || '';
+    const folderUrl = params.folder.webViewLink || buildDriveFolderUrl(folderId);
+
+    const audioId = params.audioFile ? params.audioFile.id || '' : '';
+    const audioName = params.audioFile ? params.audioFile.name || '' : '';
+    const audioMimeType = params.audioFile
+      ? params.audioFile.mimeType || state.audioBlob.type || ''
+      : '';
+    const audioUrl = params.audioFile
+      ? params.audioFile.webViewLink || buildDriveFileUrl(audioId)
+      : '';
+
+    const imageId = params.imageFile ? params.imageFile.id || '' : '';
+    const imageName = params.imageFile ? params.imageFile.name || '' : '';
+    const imageMimeType = params.imageFile
+      ? params.imageFile.mimeType || state.imageBlob.type || ''
+      : '';
+    const imageUrl = params.imageFile
+      ? params.imageFile.webViewLink || buildDriveFileUrl(imageId)
+      : '';
 
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       reportId: params.reportId,
       autoTitle: params.autoTitle,
+      title: params.autoTitle,
       userTitle: '',
       status: 'uploaded',
-      clientCreatedAt: new Date().toISOString(),
+      createdAt: createdAt,
+      clientCreatedAt: createdAt,
 
       submitter: {
         name: submitter.name || '',
         email: submitter.email || '',
         masterEmail: submitter.masterEmail || '',
         department: submitter.department || '',
-        position: submitter.position || '',
-        no: submitter.no || ''
+        role: submitter.role || submitter.position || '',
+        position: submitter.position || submitter.role || '',
+        employeeNo: submitter.employeeNo || submitter.no || '',
+        no: submitter.no || submitter.employeeNo || ''
       },
 
       targetDepartment: params.targetDepartmentName,
       targetDepartmentName: params.targetDepartmentName,
 
+      // AI解析・GAS受付処理が参照する標準Drive情報。
+      drive: {
+        folderId: folderId,
+        folderName: params.folder.name || '',
+        folderUrl: folderUrl,
+
+        audioFileId: audioId,
+        audioFileName: audioName,
+        audioMimeType: audioMimeType,
+        audioFileUrl: audioUrl,
+
+        imageFileId: imageId,
+        imageFileName: imageName,
+        imageMimeType: imageMimeType,
+        imageFileUrl: imageUrl,
+
+        metadataFileId: '',
+        metadataFileName: 'metadata.json',
+        metadataMimeType: 'application/json',
+        metadataFileUrl: ''
+      },
+
+      // 旧形式互換: 既存の画面・処理が参照しても壊れないよう残す。
       folder: {
-        id: params.folder.id,
-        name: params.folder.name,
-        url: params.folder.webViewLink || ''
+        id: folderId,
+        name: params.folder.name || '',
+        url: folderUrl
       },
 
       audio: params.audioFile
         ? {
-            id: params.audioFile.id,
-            name: params.audioFile.name,
-            mimeType: params.audioFile.mimeType || state.audioBlob.type || '',
-            url: params.audioFile.webViewLink || '',
+            id: audioId,
+            name: audioName,
+            mimeType: audioMimeType,
+            url: audioUrl,
             size: state.audioBlob ? state.audioBlob.size : 0,
             memo: audioMeta.memo || audioMeta.note || '',
             durationSec: audioMeta.durationSec || null
@@ -838,10 +894,10 @@
 
       image: params.imageFile
         ? {
-            id: params.imageFile.id,
-            name: params.imageFile.name,
-            mimeType: params.imageFile.mimeType || state.imageBlob.type || '',
-            url: params.imageFile.webViewLink || '',
+            id: imageId,
+            name: imageName,
+            mimeType: imageMimeType,
+            url: imageUrl,
             size: state.imageBlob ? state.imageBlob.size : 0,
             memo: imageMeta.memo || imageMeta.note || '',
             width: imageMeta.width || null,
@@ -991,24 +1047,53 @@
   async function notifyGasUploadCompleted(uploadResult) {
     if (!CONFIG.GAS_WEB_APP_URL) return;
 
+    const metadata = uploadResult || {};
+    const drive = metadata.drive || {};
+
+    // GAS側 Code.gs の doPost(e) は JSON.parse(e.postData.contents) で受ける。
+    // Teams通知用のキーや通知API URLはGitHub側に置かず、GAS側で処理する。
     const payload = {
       action: 'uploadCompleted',
       token: state.authToken,
-      uploadResult: uploadResult
-    };
 
-    const body = new URLSearchParams();
-    body.set('action', 'uploadCompleted');
-    body.set('payload', JSON.stringify(payload));
+      reportId: metadata.reportId || '',
+      createdAt: metadata.createdAt || metadata.clientCreatedAt || '',
+      targetDepartment: metadata.targetDepartment || metadata.targetDepartmentName || '',
+
+      folderId: drive.folderId || metadata.folder?.id || '',
+      folderUrl: drive.folderUrl || metadata.folder?.url || '',
+
+      audioFileId: drive.audioFileId || metadata.audio?.id || '',
+      audioFileUrl: drive.audioFileUrl || metadata.audio?.url || '',
+
+      imageFileId: drive.imageFileId || metadata.image?.id || '',
+      imageFileUrl: drive.imageFileUrl || metadata.image?.url || '',
+
+      metadataFileId: drive.metadataFileId || metadata.metadataFile?.id || '',
+      metadataFileUrl: drive.metadataFileUrl || metadata.metadataFile?.url || '',
+
+      metadata: metadata
+    };
 
     await fetch(CONFIG.GAS_WEB_APP_URL, {
       method: 'POST',
       mode: 'no-cors',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+        'Content-Type': 'text/plain;charset=utf-8'
       },
-      body: body.toString()
+      body: JSON.stringify(payload)
     });
+  }
+
+
+  function buildDriveFileUrl(fileId) {
+    if (!fileId) return '';
+    return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/view';
+  }
+
+  function buildDriveFolderUrl(folderId) {
+    if (!folderId) return '';
+    return 'https://drive.google.com/drive/folders/' + encodeURIComponent(folderId);
   }
 
   function renderUploadResult(result) {
@@ -1196,3 +1281,4 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 })();
+
