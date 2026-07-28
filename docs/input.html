@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>入力方法選択 | 現場問題提起ツール</title>
+  <link rel="stylesheet" href="input.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="card">
+      <p class="eyebrow">現場問題提起ツール</p>
+      <h1>入力方法を選択</h1>
+      <p class="lead">現場の状況をテキストで入力するか、音声で録音するかを選択してください。</p>
+
+      <div id="userBox" class="user-box" hidden></div>
+
+      <div class="choice-grid">
+        <button id="textModeBtn" class="choice-card" type="button">
+          <span class="choice-icon">T</span>
+          <span class="choice-title">テキスト入力</span>
+          <span class="choice-desc">短い内容や静かな場所での入力向け。文字起こしは行いません。</span>
+        </button>
+
+        <button id="audioModeBtn" class="choice-card" type="button">
+          <span class="choice-icon">REC</span>
+          <span class="choice-title">録音</span>
+          <span class="choice-desc">手入力しにくい現場での報告向け。投稿後にAIで文字起こしします。</span>
+        </button>
+      </div>
+
+      <p id="status" class="status">認証情報を確認しています...</p>
+    </section>
+  </main>
+
+  <script src="input.js"></script>
+</body>
+</html>
