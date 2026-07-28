@@ -1,154 +1,219 @@
-'use strict';
+(() => {
+  'use strict';
 
-const GAS_WEB_APP_URL = 'https://script.google.com/a/macros/ecodesign-labo.jp/s/AKfycbzyU4I8u5csBb7qRIWvSGwPBrDcYAv0p6rPO6-ModBzPCtwavFeeSaGcOf-TwJeyb7BfQ/exec';
-const DRAFT_DB_NAME = 'fieldReportDraftDb';
-const DRAFT_STORE_NAME = 'drafts';
-const DRAFT_KEY = 'currentDraft';
+  const CONFIG = {
+    GAS_WEB_APP_URL: 'https://script.google.com/a/macros/ecodesign-labo.jp/s/AKfycbzyU4I8u5csBb7qRIWvSGwPBrDcYAv0p6rPO6-ModBzPCtwavFeeSaGcOf-TwJeyb7BfQ/exec',
+    DB_NAME: 'field-report-draft-db',
+    DB_VERSION: 1,
+    STORE_NAME: 'draft',
+    AUTH_TOKEN_STORAGE_KEY: 'fieldReportAuthToken'
+  };
 
-const state = {
-  token: '',
-  context: null
-};
+  const state = {
+    authToken: '',
+    db: null,
+    context: null,
+    isStarting: false
+  };
 
-document.addEventListener('DOMContentLoaded', init);
+  const elements = {};
 
-async function init() {
-  const params = new URLSearchParams(location.search);
-  state.token = params.get('token') || sessionStorage.getItem('fieldReportToken') || '';
+  document.addEventListener('DOMContentLoaded', initializePage);
 
-  if (!state.token) {
-    setStatus('tokenがありません。GAS承認画面から開き直してください。');
-    disableButtons(true);
-    return;
-  }
+  async function initializePage() {
+    collectElements();
+    bindEvents();
 
-  sessionStorage.setItem('fieldReportToken', state.token);
-
-  try {
-    state.context = await fetchContextJsonp(state.token);
-    if (!state.context || !state.context.ok) {
-      throw new Error((state.context && state.context.error) || 'context取得に失敗しました。');
+    state.authToken = getAuthTokenFromUrlOrStorage();
+    if (!state.authToken) {
+      showFatalError('認証情報がありません。GAS入口から開き直してください。');
+      return;
     }
 
-    renderUser(state.context.submitter || state.context.currentUser || {});
-    setStatus('入力方法を選択してください。');
-    disableButtons(false);
-  } catch (err) {
-    setStatus('認証情報の確認に失敗しました: ' + errorToString(err));
-    disableButtons(true);
-  }
-
-  document.getElementById('textModeBtn').addEventListener('click', () => startMode('text'));
-  document.getElementById('audioModeBtn').addEventListener('click', () => startMode('audio'));
-}
-
-async function startMode(mode) {
-  try {
-    disableButtons(true);
-    setStatus('準備しています...');
-
-    const draft = {
-      version: 2,
-      inputMode: mode,
-      token: state.token,
-      context: state.context,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      text: null,
-      audio: null,
-      image: null
-    };
-
-    await saveDraft(draft);
-
-    const target = mode === 'text' ? 'text.html' : 'record.html';
-    location.href = target + '?token=' + encodeURIComponent(state.token);
-  } catch (err) {
-    setStatus('開始処理に失敗しました: ' + errorToString(err));
-    disableButtons(false);
-  }
-}
-
-function fetchContextJsonp(token) {
-  return new Promise((resolve, reject) => {
-    const callbackName = 'fieldReportContext_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
-    const script = document.createElement('script');
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('context取得がタイムアウトしました。'));
-    }, 15000);
-
-    window[callbackName] = data => {
-      clearTimeout(timeout);
-      cleanup();
-      resolve(data);
-    };
-
-    script.onerror = () => {
-      clearTimeout(timeout);
-      cleanup();
-      reject(new Error('context取得用スクリプトの読み込みに失敗しました。'));
-    };
-
-    const url = new URL(GAS_WEB_APP_URL);
-    url.searchParams.set('action', 'context');
-    url.searchParams.set('token', token);
-    url.searchParams.set('callback', callbackName);
-    script.src = url.toString();
-    document.body.appendChild(script);
-
-    function cleanup() {
-      try { delete window[callbackName]; } catch (e) { window[callbackName] = undefined; }
-      if (script.parentNode) script.parentNode.removeChild(script);
+    try {
+      state.db = await openDatabase();
+      state.context = await fetchApplicationContext(state.authToken);
+      renderSubmitter(state.context.submitter || state.context.currentUser || {});
+      setAuthStatus('利用者確認完了', 'ready');
+      setModeButtonsEnabled(true);
+    } catch (error) {
+      showFatalError('利用者情報を取得できませんでした。\n' + getErrorMessage(error));
     }
-  });
-}
+  }
 
-function renderUser(user) {
-  const box = document.getElementById('userBox');
-  box.hidden = false;
-  box.innerHTML = [
-    '<strong>ログインユーザー</strong>',
-    '氏名：' + escapeHtml(user.name || '-'),
-    'メール：' + escapeHtml(user.email || '-'),
-    '所属：' + escapeHtml(user.department || '-')
-  ].join('<br>');
-}
+  function collectElements() {
+    elements.helpButton = document.getElementById('helpButton');
+    elements.authStatusBadge = document.getElementById('authStatusBadge');
+    elements.submitterName = document.getElementById('submitterName');
+    elements.submitterDepartment = document.getElementById('submitterDepartment');
+    elements.submitterEmail = document.getElementById('submitterEmail');
+    elements.textModeButton = document.getElementById('textModeButton');
+    elements.audioModeButton = document.getElementById('audioModeButton');
+    elements.statusBox = document.getElementById('statusBox');
+  }
 
-function disableButtons(disabled) {
-  document.getElementById('textModeBtn').disabled = disabled;
-  document.getElementById('audioModeBtn').disabled = disabled;
-}
+  function bindEvents() {
+    elements.helpButton.addEventListener('click', () => {
+      showStatus(
+        'テキスト入力は入力内容をそのままAI解析します。録音は投稿後に文字起こししてからAI解析します。',
+        'info'
+      );
+    });
 
-function setStatus(text) {
-  document.getElementById('status').textContent = text || '';
-}
+    elements.textModeButton.addEventListener('click', () => startInputMode('text'));
+    elements.audioModeButton.addEventListener('click', () => startInputMode('audio'));
+  }
 
-function saveDraft(draft) {
-  return openDb().then(db => new Promise((resolve, reject) => {
-    const tx = db.transaction(DRAFT_STORE_NAME, 'readwrite');
-    tx.objectStore(DRAFT_STORE_NAME).put(draft, DRAFT_KEY);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  }));
-}
+  async function startInputMode(mode) {
+    if (state.isStarting) return;
 
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DRAFT_DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(DRAFT_STORE_NAME)) db.createObjectStore(DRAFT_STORE_NAME);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
+    state.isStarting = true;
+    setModeButtonsEnabled(false);
+    showStatus('入力画面を準備しています...', 'info');
 
-function escapeHtml(value) {
-  return String(value || '').replace(/[&<>'"]/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[s]));
-}
+    try {
+      await clearPreviousDraft();
+      await putDraft('inputMode', mode);
+      await putDraft('draftStartedAt', new Date().toISOString());
 
-function errorToString(err) {
-  return err && (err.message || err.stack) ? (err.message || err.stack) : String(err);
-}
+      location.href = mode === 'text' ? './text.html' : './record.html';
+    } catch (error) {
+      state.isStarting = false;
+      setModeButtonsEnabled(true);
+      showStatus('入力画面を開始できませんでした。\n' + getErrorMessage(error), 'error');
+    }
+  }
+
+  async function clearPreviousDraft() {
+    const keys = [
+      'inputMode',
+      'draftStartedAt',
+      'textBody',
+      'textMeta',
+      'audioBlob',
+      'audioMeta',
+      'imageBlob',
+      'imageMeta',
+      'uploadResult'
+    ];
+
+    await Promise.all(keys.map(deleteDraft));
+  }
+
+  function renderSubmitter(submitter) {
+    elements.submitterName.textContent = submitter.name || '-';
+    elements.submitterDepartment.textContent = submitter.department || '-';
+    elements.submitterEmail.textContent = submitter.email || '-';
+  }
+
+  function setAuthStatus(text, type) {
+    elements.authStatusBadge.textContent = text;
+    elements.authStatusBadge.classList.remove('status-waiting', 'status-ready', 'status-error');
+    elements.authStatusBadge.classList.add(type === 'ready' ? 'status-ready' : type === 'error' ? 'status-error' : 'status-waiting');
+  }
+
+  function setModeButtonsEnabled(enabled) {
+    elements.textModeButton.disabled = !enabled;
+    elements.audioModeButton.disabled = !enabled;
+  }
+
+  function showFatalError(message) {
+    setAuthStatus('利用不可', 'error');
+    setModeButtonsEnabled(false);
+    showStatus(message, 'error');
+  }
+
+  function showStatus(message, type) {
+    if (!message) {
+      elements.statusBox.className = 'status-box hidden';
+      elements.statusBox.textContent = '';
+      return;
+    }
+
+    elements.statusBox.className = 'status-box ' + (type || 'info');
+    elements.statusBox.textContent = message;
+  }
+
+  function getAuthTokenFromUrlOrStorage() {
+    const url = new URL(location.href);
+    const tokenFromUrl = url.searchParams.get('token');
+
+    if (tokenFromUrl) {
+      sessionStorage.setItem(CONFIG.AUTH_TOKEN_STORAGE_KEY, tokenFromUrl);
+      sessionStorage.setItem('fieldReportToken', tokenFromUrl);
+      url.searchParams.delete('token');
+      history.replaceState({}, document.title, url.toString());
+      return tokenFromUrl;
+    }
+
+    return sessionStorage.getItem(CONFIG.AUTH_TOKEN_STORAGE_KEY)
+      || sessionStorage.getItem('fieldReportToken')
+      || '';
+  }
+
+  function fetchApplicationContext(token) {
+    return new Promise((resolve, reject) => {
+      const callbackName = '__fieldReportContext_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      const script = document.createElement('script');
+      const timeoutId = setTimeout(() => finish(new Error('利用者情報の取得がタイムアウトしました。')), 15000);
+
+      function finish(error, value) {
+        clearTimeout(timeoutId);
+        delete window[callbackName];
+        script.remove();
+        error ? reject(error) : resolve(value);
+      }
+
+      window[callbackName] = response => {
+        if (!response || !response.ok) {
+          finish(new Error(response && response.error ? response.error : '利用者情報を取得できませんでした。'));
+          return;
+        }
+        finish(null, response);
+      };
+
+      script.onerror = () => finish(new Error('GASへの接続に失敗しました。'));
+      script.src = CONFIG.GAS_WEB_APP_URL
+        + '?action=context&token=' + encodeURIComponent(token)
+        + '&callback=' + encodeURIComponent(callbackName);
+      document.head.appendChild(script);
+    });
+  }
+
+  function openDatabase() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
+
+      request.onupgradeneeded = event => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(CONFIG.STORE_NAME)) {
+          db.createObjectStore(CONFIG.STORE_NAME);
+        }
+      };
+
+      request.onsuccess = event => resolve(event.target.result);
+      request.onerror = event => reject(event.target.error);
+    });
+  }
+
+  function putDraft(key, value) {
+    return runStoreRequest('readwrite', store => store.put(value, key));
+  }
+
+  function deleteDraft(key) {
+    return runStoreRequest('readwrite', store => store.delete(key));
+  }
+
+  function runStoreRequest(mode, requestFactory) {
+    return new Promise((resolve, reject) => {
+      const transaction = state.db.transaction(CONFIG.STORE_NAME, mode);
+      const request = requestFactory(transaction.objectStore(CONFIG.STORE_NAME));
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = event => reject(event.target.error);
+    });
+  }
+
+  function getErrorMessage(error) {
+    return error && error.message ? String(error.message) : String(error || '不明なエラーです。');
+  }
+})();
