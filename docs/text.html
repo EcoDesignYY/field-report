@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>テキスト入力 | 現場問題提起ツール</title>
+  <link rel="stylesheet" href="text.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="card">
+      <p class="eyebrow">現場問題提起ツール</p>
+      <h1>問題内容を入力</h1>
+      <p class="lead">発生した現象、困っていること、気づいた点を入力してください。箇条書きでも構いません。</p>
+
+      <label class="label" for="problemText">問題内容</label>
+      <textarea id="problemText" rows="12" maxlength="4000" placeholder="例: 検査工程で〇〇の表示が見づらく、作業者によって判断がばらついている。写真も添付します。"></textarea>
+      <div class="counter"><span id="charCount">0</span> / 4000</div>
+
+      <div class="actions">
+        <button id="backBtn" class="btn secondary" type="button">戻る</button>
+        <button id="nextBtn" class="btn primary" type="button">画像撮影へ</button>
+      </div>
+
+      <p id="status" class="status"></p>
+    </section>
+  </main>
+  <script src="text.js"></script>
+</body>
+</html>
