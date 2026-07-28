@@ -1,38 +1,68 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>入力方法選択 | 現場問題提起ツール</title>
-  <link rel="stylesheet" href="input.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>入力方法選択</title>
+  <link rel="stylesheet" href="./input.css?v=readable-old-ui-v4">
 </head>
 <body>
-  <main class="app-shell">
-    <section class="card">
-      <p class="eyebrow">現場問題提起ツール</p>
-      <h1>入力方法を選択</h1>
-      <p class="lead">現場の状況をテキストで入力するか、音声で録音するかを選択してください。</p>
+  <div class="app-shell">
+    <header class="top-bar">
+      <div class="top-spacer"></div>
+      <div class="top-title">入力方法選択</div>
+      <button id="helpButton" type="button" class="top-button">ヘルプ</button>
+    </header>
 
-      <div id="userBox" class="user-box" hidden></div>
+    <main class="content">
+      <section class="hero-card">
+        <div id="authStatusBadge" class="status-badge status-waiting">利用者確認中</div>
+        <h1>問題内容の入力方法を選択</h1>
+        <p>短い内容はテキスト、現場で手入力しづらい場合は録音を選択してください。</p>
+      </section>
 
-      <div class="choice-grid">
-        <button id="textModeBtn" class="choice-card" type="button">
-          <span class="choice-icon">T</span>
+      <section class="user-card">
+        <h2>投稿者</h2>
+        <div class="info-grid">
+          <div>
+            <div class="label">氏名</div>
+            <div id="submitterName" class="value">取得中...</div>
+          </div>
+          <div>
+            <div class="label">所属部署</div>
+            <div id="submitterDepartment" class="value">取得中...</div>
+          </div>
+        </div>
+        <div id="submitterEmail" class="email-line">取得中...</div>
+      </section>
+
+      <section class="choice-grid" aria-label="入力方法">
+        <button id="textModeButton" type="button" class="choice-card" disabled>
+          <span class="choice-icon" aria-hidden="true">文</span>
           <span class="choice-title">テキスト入力</span>
-          <span class="choice-desc">短い内容や静かな場所での入力向け。文字起こしは行いません。</span>
+          <span class="choice-description">文章を直接入力します。文字起こし処理は行いません。</span>
         </button>
 
-        <button id="audioModeBtn" class="choice-card" type="button">
-          <span class="choice-icon">REC</span>
+        <button id="audioModeButton" type="button" class="choice-card" disabled>
+          <span class="choice-icon choice-icon-audio" aria-hidden="true">●</span>
           <span class="choice-title">録音</span>
-          <span class="choice-desc">手入力しにくい現場での報告向け。投稿後にAIで文字起こしします。</span>
+          <span class="choice-description">音声で状況を説明します。投稿後に文字起こしします。</span>
         </button>
-      </div>
+      </section>
 
-      <p id="status" class="status">認証情報を確認しています...</p>
-    </section>
-  </main>
+      <section class="tips-card">
+        <h2>選択の目安</h2>
+        <ul>
+          <li>内容を短く整理できる場合はテキスト入力が適しています。</li>
+          <li>機械を見ながら説明する場合や手袋着用時は録音が適しています。</li>
+          <li>どちらを選んでも、画像の撮影・添付へ進めます。</li>
+        </ul>
+      </section>
 
-  <script src="input.js"></script>
+      <div id="statusBox" class="status-box hidden"></div>
+    </main>
+  </div>
+
+  <script src="./input.js?v=readable-old-ui-v4"></script>
 </body>
 </html>
