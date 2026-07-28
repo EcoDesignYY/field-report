@@ -1,4 +1,6 @@
 (() => {
+  'use strict';
+
   const CONFIG = {
     DB_NAME: 'field-report-draft-db',
     DB_VERSION: 1,
@@ -9,28 +11,37 @@
     PREVIOUS_PAGE_URL: './input.html'
   };
 
+  const PLATFORM = detectPlatform();
+
   const state = {
     db: null,
     authToken: '',
+
     mediaStream: null,
     mediaRecorder: null,
     audioChunks: [],
     audioBlob: null,
     audioObjectUrl: '',
+
     audioContext: null,
     analyser: null,
     waveformData: null,
     animationId: null,
+
     startedAt: 0,
     elapsedMs: 0,
     timerId: null,
+
     status: 'idle',
-    mimeType: ''
+    requestedMimeType: '',
+    actualMimeType: '',
+    recordingSequence: 0
   };
 
   const els = {};
 
   document.addEventListener('DOMContentLoaded', init);
+  window.addEventListener('pagehide', releaseRecordingResources);
 
   async function init() {
     collectElements();
@@ -45,11 +56,15 @@
 
     try {
       state.db = await openDb();
+
       await putDraft('inputMode', 'audio');
       await deleteDraft('textBody');
       await deleteDraft('textMeta');
+
       clearWaveform();
       await loadExistingDraft();
+
+      logRecordingEnvironment();
       setStatus('', '');
       setRecordStatus('マイク準備完了', 'ready');
     } catch (error) {
@@ -75,6 +90,33 @@
     els.audioMemoInput = document.getElementById('audioMemoInput');
     els.nextButton = document.getElementById('nextButton');
     els.statusBox = document.getElementById('statusBox');
+
+    const requiredElements = [
+      'backButton',
+      'helpButton',
+      'recordStatusBadge',
+      'timerText',
+      'waveCanvas',
+      'recordButton',
+      'recordLabel',
+      'pauseButton',
+      'resetButton',
+      'audioPreviewArea',
+      'playAudioButton',
+      'audioPlayStatus',
+      'audioPlayer',
+      'audioMemoInput',
+      'nextButton',
+      'statusBox'
+    ];
+
+    const missing = requiredElements.filter(name => !els[name]);
+
+    if (missing.length > 0) {
+      throw new Error('record.html に必要な要素がありません: ' + missing.join(', '));
+    }
+
+    els.audioPlayer.playsInline = true;
   }
 
   function bindEvents() {
@@ -84,20 +126,28 @@
 
     els.helpButton.addEventListener('click', () => {
       setStatus(
-        '録音ボタンを押すと録音を開始します。もう一度押すと停止します。\n録音後、必要に応じて再生確認してから次へ進んでください。',
+        '録音ボタンを押すと録音を開始します。もう一度押すと停止します。\n' +
+        'マイク許可を求められた場合は「許可」を選択してください。',
         'info'
       );
     });
 
     els.recordButton.addEventListener('click', handleRecordButtonClick);
     els.pauseButton.addEventListener('click', togglePauseRecording);
-    els.resetButton.addEventListener('click', resetRecording);
+    els.resetButton.addEventListener('click', () => resetRecording(true));
     els.playAudioButton.addEventListener('click', toggleAudioPlayback);
     els.nextButton.addEventListener('click', saveAndGoNext);
 
     els.audioPlayer.addEventListener('ended', () => {
       els.playAudioButton.textContent = '再生';
       els.audioPlayStatus.textContent = '再生が終了しました';
+    });
+
+    els.audioPlayer.addEventListener('error', () => {
+      setStatus(
+        '録音データの再生に失敗しました。録音形式が端末に対応していない可能性があります。録り直してください。',
+        'error'
+      );
     });
   }
 
@@ -134,89 +184,275 @@
   }
 
   async function startRecording() {
+    const sequence = ++state.recordingSequence;
+
     try {
-      resetRecording(false);
+      resetRecording(false, { keepSequence: true });
+      validateRecordingEnvironment();
 
-      if (!window.isSecureContext) {
-        throw new Error('録音にはHTTPS環境が必要です。GitHub PagesのURLを直接開いてください。');
+      setRecordStatus('マイク確認中', 'ready');
+      setStatus('マイクへのアクセスを確認しています。', 'info');
+
+      const stream = await getMicrophoneStream();
+
+      if (sequence !== state.recordingSequence) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
       }
 
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('このブラウザは録音機能に対応していません。iPhoneはSafari、AndroidはChromeを使用してください。');
+      const audioTrack = stream.getAudioTracks()[0];
+
+      if (!audioTrack || audioTrack.readyState !== 'live') {
+        stream.getTracks().forEach(track => track.stop());
+        throw new Error('利用可能なマイク音声トラックを取得できませんでした。');
       }
 
-      if (typeof MediaRecorder === 'undefined') {
-        throw new Error('このブラウザはMediaRecorderに対応していません。');
-      }
+      state.mediaStream = stream;
 
-      state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      state.mimeType = getSupportedAudioMimeType();
+      const recorderInfo = createCompatibleMediaRecorder(stream);
+      const recorder = recorderInfo.recorder;
+      const chunks = [];
 
-      const options = state.mimeType ? { mimeType: state.mimeType } : undefined;
-      state.mediaRecorder = new MediaRecorder(state.mediaStream, options);
-      state.audioChunks = [];
+      state.mediaRecorder = recorder;
+      state.audioChunks = chunks;
+      state.requestedMimeType = recorderInfo.requestedMimeType;
+      state.actualMimeType = recorder.mimeType || recorderInfo.requestedMimeType || '';
 
-      state.mediaRecorder.ondataavailable = event => {
+      recorder.ondataavailable = event => {
         if (event.data && event.data.size > 0) {
-          state.audioChunks.push(event.data);
+          chunks.push(event.data);
         }
       };
 
-      state.mediaRecorder.onerror = event => {
-        setStatus('録音中にエラーが発生しました。\n' + getErrorMessage(event.error || event), 'error');
+      recorder.onerror = event => {
+        const recorderError = event && event.error ? event.error : event;
+        setStatus('録音中にエラーが発生しました。\n' + getErrorMessage(recorderError), 'error');
       };
 
-      state.mediaRecorder.onstop = handleRecorderStop;
+      recorder.onstop = () => {
+        handleRecorderStop({
+          recorder,
+          chunks,
+          sequence,
+          requestedMimeType: recorderInfo.requestedMimeType
+        });
+      };
 
-      setupWaveform(state.mediaStream);
+      await setupWaveform(stream);
 
       state.startedAt = Date.now();
       state.elapsedMs = 0;
       state.status = 'recording';
-      state.mediaRecorder.start(1000);
+
+      /*
+       * iOS系ブラウザでは、細切れのtimesliceを指定せず、停止時に1つのBlobを
+       * 受け取る方が安定するため、引数なしで開始する。
+       */
+      recorder.start();
 
       startTimer();
       startWaveform();
-
       renderState();
       setStatus('', '');
 
+      console.info('[record] started', {
+        platform: PLATFORM,
+        requestedMimeType: state.requestedMimeType,
+        actualMimeType: recorder.mimeType,
+        trackSettings: safeGetTrackSettings(audioTrack)
+      });
     } catch (error) {
       cleanupStream();
+      stopWaveform();
+      state.status = 'idle';
+      renderState();
       setRecordStatus('録音不可', 'error');
-      setStatus('録音を開始できませんでした。\n' + getErrorMessage(error), 'error');
+      setStatus(buildRecordingErrorMessage(error), 'error');
+
+      console.error('[record] start failed', error);
+    }
+  }
+
+  function validateRecordingEnvironment() {
+    if (!window.isSecureContext) {
+      throw createNamedError(
+        'SecurityError',
+        '録音にはHTTPS環境が必要です。GitHub PagesのURLを直接開いてください。'
+      );
+    }
+
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      throw createNamedError(
+        'NotSupportedError',
+        'このブラウザではマイク取得機能を利用できません。Chromeを最新版に更新してください。'
+      );
+    }
+
+    if (typeof window.MediaRecorder === 'undefined') {
+      throw createNamedError(
+        'NotSupportedError',
+        'このブラウザでは録音機能を利用できません。Chromeを最新版に更新してください。'
+      );
+    }
+  }
+
+  async function getMicrophoneStream() {
+    /*
+     * iPhone / iPadでは単純なaudio:trueを優先する。
+     * Androidなどでは一般的な音声補正を要求し、失敗時はaudio:trueへ戻す。
+     */
+    if (PLATFORM.isIOS) {
+      return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    }
+
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1
+        },
+        video: false
+      });
+    } catch (error) {
+      if (
+        error &&
+        (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError' || error.name === 'TypeError')
+      ) {
+        return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      }
+
+      throw error;
+    }
+  }
+
+  function createCompatibleMediaRecorder(stream) {
+    const candidates = getMimeTypeCandidates();
+    const errors = [];
+
+    for (const mimeType of candidates) {
+      if (!isMimeTypeSupported(mimeType)) {
+        continue;
+      }
+
+      try {
+        const recorder = new MediaRecorder(stream, {
+          mimeType,
+          audioBitsPerSecond: 64000
+        });
+
+        return {
+          recorder,
+          requestedMimeType: mimeType
+        };
+      } catch (error) {
+        errors.push(mimeType + ': ' + getErrorMessage(error));
+      }
+    }
+
+    /*
+     * isTypeSupported()の結果と実際のコンストラクタ挙動が一致しない端末に備え、
+     * 最後はブラウザ既定形式で生成する。
+     */
+    try {
+      return {
+        recorder: new MediaRecorder(stream),
+        requestedMimeType: ''
+      };
+    } catch (error) {
+      const detail = errors.length > 0 ? '\n試行結果: ' + errors.join(' / ') : '';
+      throw createNamedError(
+        error && error.name ? error.name : 'NotSupportedError',
+        'この端末で利用可能な録音形式を作成できませんでした。' + detail
+      );
+    }
+  }
+
+  function getMimeTypeCandidates() {
+    if (PLATFORM.isIOS) {
+      return [
+        'audio/mp4;codecs=mp4a.40.2',
+        'audio/mp4',
+        'audio/webm;codecs=opus',
+        'audio/webm'
+      ];
+    }
+
+    return [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4;codecs=mp4a.40.2',
+      'audio/mp4'
+    ];
+  }
+
+  function isMimeTypeSupported(mimeType) {
+    if (!mimeType) return false;
+
+    if (typeof MediaRecorder.isTypeSupported !== 'function') {
+      return PLATFORM.isIOS ? mimeType.indexOf('audio/mp4') === 0 : true;
+    }
+
+    try {
+      return MediaRecorder.isTypeSupported(mimeType);
+    } catch (_) {
+      return false;
     }
   }
 
   async function stopRecording() {
-    if (!state.mediaRecorder) return;
+    const recorder = state.mediaRecorder;
+
+    if (!recorder) return;
 
     try {
       if (state.status === 'recording') {
         state.elapsedMs += Date.now() - state.startedAt;
       }
 
-      if (state.mediaRecorder.state !== 'inactive') {
-        state.mediaRecorder.stop();
+      stopTimer();
+      setRecordStatus('録音を保存中', 'ready');
+      els.recordButton.disabled = true;
+      els.pauseButton.disabled = true;
+
+      if (recorder.state !== 'inactive') {
+        recorder.stop();
       }
     } catch (error) {
+      els.recordButton.disabled = false;
       setStatus('録音停止に失敗しました。\n' + getErrorMessage(error), 'error');
     }
   }
 
-  function handleRecorderStop() {
+  function handleRecorderStop({ recorder, chunks, sequence, requestedMimeType }) {
+    if (sequence !== state.recordingSequence) {
+      return;
+    }
+
     stopTimer();
     stopWaveform();
 
-    const mimeType = state.mimeType || (state.audioChunks[0] ? state.audioChunks[0].type : '') || 'audio/webm';
-    state.audioBlob = new Blob(state.audioChunks, { type: mimeType });
+    const actualMimeType =
+      recorder.mimeType ||
+      (chunks[0] && chunks[0].type) ||
+      requestedMimeType ||
+      (PLATFORM.isIOS ? 'audio/mp4' : 'audio/webm');
+
+    state.actualMimeType = actualMimeType;
+    state.audioBlob = new Blob(chunks, { type: actualMimeType });
 
     cleanupStream();
+    state.mediaRecorder = null;
+    els.recordButton.disabled = false;
 
-    if (state.audioBlob.size <= 0) {
+    if (!state.audioBlob || state.audioBlob.size <= 0) {
       state.status = 'idle';
       setRecordStatus('録音失敗', 'error');
-      setStatus('録音データが作成されませんでした。もう一度録音してください。', 'error');
+      setStatus(
+        '録音データが作成されませんでした。Chromeのマイク権限を確認し、他の通話アプリを終了してから録り直してください。',
+        'error'
+      );
       renderState();
       return;
     }
@@ -227,6 +463,7 @@
 
     state.audioObjectUrl = URL.createObjectURL(state.audioBlob);
     els.audioPlayer.src = state.audioObjectUrl;
+    els.audioPlayer.load();
 
     state.status = 'recorded';
     setRecordStatus('録音済み', 'ready');
@@ -235,39 +472,73 @@
     els.audioPlayStatus.textContent = '再生できます';
 
     renderState();
+
+    console.info('[record] stopped', {
+      mimeType: actualMimeType,
+      size: state.audioBlob.size,
+      chunks: chunks.length,
+      durationSec: Math.max(1, Math.round(state.elapsedMs / 1000))
+    });
   }
 
   function togglePauseRecording() {
-    if (!state.mediaRecorder) return;
+    const recorder = state.mediaRecorder;
 
-    if (state.mediaRecorder.state === 'recording') {
-      state.mediaRecorder.pause();
-      state.elapsedMs += Date.now() - state.startedAt;
-      state.status = 'paused';
-      stopTimer();
-      setRecordStatus('一時停止中', 'paused');
-      renderState();
-      return;
-    }
+    if (!recorder) return;
 
-    if (state.mediaRecorder.state === 'paused') {
-      state.mediaRecorder.resume();
-      state.startedAt = Date.now();
-      state.status = 'recording';
-      startTimer();
-      setRecordStatus('録音中', 'recording');
-      renderState();
+    try {
+      if (recorder.state === 'recording') {
+        if (typeof recorder.pause !== 'function') {
+          setStatus('この端末では一時停止を利用できません。停止して保存してください。', 'warning');
+          return;
+        }
+
+        recorder.pause();
+        state.elapsedMs += Date.now() - state.startedAt;
+        state.status = 'paused';
+        stopTimer();
+        setRecordStatus('一時停止中', 'paused');
+        renderState();
+        return;
+      }
+
+      if (recorder.state === 'paused') {
+        if (typeof recorder.resume !== 'function') {
+          setStatus('この端末では録音再開を利用できません。停止して保存してください。', 'warning');
+          return;
+        }
+
+        recorder.resume();
+        state.startedAt = Date.now();
+        state.status = 'recording';
+        startTimer();
+        setRecordStatus('録音中', 'recording');
+        renderState();
+      }
+    } catch (error) {
+      setStatus('一時停止・再開に失敗しました。\n' + getErrorMessage(error), 'error');
     }
   }
 
-  function resetRecording(showMessage = true) {
+  function resetRecording(showMessage = true, options = {}) {
     stopTimer();
     stopWaveform();
 
-    if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+    if (!options.keepSequence) {
+      state.recordingSequence += 1;
+    }
+
+    const recorder = state.mediaRecorder;
+
+    if (recorder && recorder.state !== 'inactive') {
       try {
-        state.mediaRecorder.stop();
-      } catch (_) {}
+        recorder.ondataavailable = null;
+        recorder.onstop = null;
+        recorder.onerror = null;
+        recorder.stop();
+      } catch (_) {
+        // リセット処理なので停止エラーは無視する。
+      }
     }
 
     cleanupStream();
@@ -283,8 +554,10 @@
     state.startedAt = 0;
     state.elapsedMs = 0;
     state.status = 'idle';
-    state.mimeType = '';
+    state.requestedMimeType = '';
+    state.actualMimeType = '';
 
+    els.audioPlayer.pause();
     els.audioPlayer.removeAttribute('src');
     els.audioPlayer.load();
     els.audioPreviewArea.classList.add('hidden');
@@ -301,11 +574,18 @@
     }
   }
 
+  function releaseRecordingResources() {
+    stopTimer();
+    stopWaveform();
+    cleanupStream();
+  }
+
   function toggleAudioPlayback() {
     if (!state.audioBlob) return;
 
     if (els.audioPlayer.paused) {
-      els.audioPlayer.play()
+      els.audioPlayer
+        .play()
         .then(() => {
           els.playAudioButton.textContent = '停止';
           els.audioPlayStatus.textContent = '再生中';
@@ -328,12 +608,16 @@
     }
 
     try {
+      const mimeType = state.audioBlob.type || state.actualMimeType || state.requestedMimeType;
       const meta = {
-        mimeType: state.audioBlob.type || state.mimeType || 'audio/webm',
+        mimeType: mimeType || (PLATFORM.isIOS ? 'audio/mp4' : 'audio/webm'),
+        fileExtension: getExtensionFromMimeType(mimeType),
         size: state.audioBlob.size,
         durationSec: Math.max(1, Math.round(state.elapsedMs / 1000)),
         memo: els.audioMemoInput.value.trim(),
-        savedAt: new Date().toISOString()
+        savedAt: new Date().toISOString(),
+        browser: PLATFORM.browser,
+        os: PLATFORM.os
       };
 
       await putDraft('inputMode', 'audio');
@@ -341,7 +625,6 @@
       await putDraft('audioMeta', meta);
 
       location.href = CONFIG.NEXT_PAGE_URL;
-
     } catch (error) {
       setStatus('録音データの保存に失敗しました。\n' + getErrorMessage(error), 'error');
     }
@@ -351,41 +634,58 @@
     const audioBlob = await getDraft('audioBlob');
     const audioMeta = await getDraft('audioMeta');
 
-    if (audioBlob) {
-      state.audioBlob = audioBlob;
-      state.status = 'recorded';
-      state.elapsedMs = audioMeta && audioMeta.durationSec ? Number(audioMeta.durationSec) * 1000 : 0;
-
-      if (state.audioObjectUrl) {
-        URL.revokeObjectURL(state.audioObjectUrl);
-      }
-
-      state.audioObjectUrl = URL.createObjectURL(audioBlob);
-      els.audioPlayer.src = state.audioObjectUrl;
-      els.audioPreviewArea.classList.remove('hidden');
-      els.playAudioButton.disabled = false;
-      els.audioPlayStatus.textContent = '再生できます';
-
-      if (audioMeta && audioMeta.memo) {
-        els.audioMemoInput.value = audioMeta.memo;
-      }
-
-      renderTimer(state.elapsedMs);
+    if (!audioBlob) {
       renderState();
-    } else {
-      renderState();
+      return;
     }
+
+    state.audioBlob = audioBlob;
+    state.actualMimeType = audioBlob.type || (audioMeta && audioMeta.mimeType) || '';
+    state.status = 'recorded';
+    state.elapsedMs = audioMeta && audioMeta.durationSec
+      ? Number(audioMeta.durationSec) * 1000
+      : 0;
+
+    if (state.audioObjectUrl) {
+      URL.revokeObjectURL(state.audioObjectUrl);
+    }
+
+    state.audioObjectUrl = URL.createObjectURL(audioBlob);
+    els.audioPlayer.src = state.audioObjectUrl;
+    els.audioPlayer.load();
+    els.audioPreviewArea.classList.remove('hidden');
+    els.playAudioButton.disabled = false;
+    els.audioPlayStatus.textContent = '再生できます';
+
+    if (audioMeta && audioMeta.memo) {
+      els.audioMemoInput.value = audioMeta.memo;
+    }
+
+    renderTimer(state.elapsedMs);
+    renderState();
   }
 
-  function setupWaveform(stream) {
+  async function setupWaveform(stream) {
     try {
-      state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+      if (!AudioContextClass) {
+        return;
+      }
+
+      state.audioContext = new AudioContextClass();
+
+      if (state.audioContext.state === 'suspended') {
+        await state.audioContext.resume();
+      }
+
       const source = state.audioContext.createMediaStreamSource(stream);
       state.analyser = state.audioContext.createAnalyser();
       state.analyser.fftSize = 2048;
       source.connect(state.analyser);
       state.waveformData = new Uint8Array(state.analyser.fftSize);
-    } catch (_) {
+    } catch (error) {
+      console.warn('[record] waveform disabled', error);
       state.audioContext = null;
       state.analyser = null;
       state.waveformData = null;
@@ -417,9 +717,9 @@
       const sliceWidth = canvas.width / state.waveformData.length;
       let x = 0;
 
-      for (let i = 0; i < state.waveformData.length; i++) {
+      for (let i = 0; i < state.waveformData.length; i += 1) {
         const v = state.waveformData[i] / 128.0;
-        const y = v * canvas.height / 2;
+        const y = (v * canvas.height) / 2;
 
         if (i === 0) {
           ctx.moveTo(x, y);
@@ -446,7 +746,9 @@
     if (state.audioContext) {
       try {
         state.audioContext.close();
-      } catch (_) {}
+      } catch (_) {
+        // 終了処理なので無視する。
+      }
     }
 
     state.audioContext = null;
@@ -516,38 +818,54 @@
     els.recordButton.classList.toggle('paused', isPaused);
 
     if (isRecording) {
+      els.recordButton.disabled = false;
       els.recordLabel.textContent = '録音中';
       els.pauseButton.disabled = false;
       els.pauseButton.textContent = '一時停止';
       els.resetButton.disabled = false;
       els.nextButton.disabled = true;
       setRecordStatus('録音中', 'recording');
-    } else if (isPaused) {
+      return;
+    }
+
+    if (isPaused) {
+      els.recordButton.disabled = false;
       els.recordLabel.textContent = '停止して保存';
       els.pauseButton.disabled = false;
       els.pauseButton.textContent = '再開';
       els.resetButton.disabled = false;
       els.nextButton.disabled = true;
       setRecordStatus('一時停止中', 'paused');
-    } else if (isRecorded) {
+      return;
+    }
+
+    if (isRecorded) {
+      els.recordButton.disabled = false;
       els.recordLabel.textContent = '録り直す';
       els.pauseButton.disabled = true;
       els.pauseButton.textContent = '一時停止';
       els.resetButton.disabled = false;
       els.nextButton.disabled = false;
       setRecordStatus('録音済み', 'ready');
-    } else {
-      els.recordLabel.textContent = '録音開始';
-      els.pauseButton.disabled = true;
-      els.pauseButton.textContent = '一時停止';
-      els.resetButton.disabled = true;
-      els.nextButton.disabled = true;
+      return;
     }
+
+    els.recordButton.disabled = false;
+    els.recordLabel.textContent = '録音開始';
+    els.pauseButton.disabled = true;
+    els.pauseButton.textContent = '一時停止';
+    els.resetButton.disabled = true;
+    els.nextButton.disabled = true;
   }
 
   function setRecordStatus(text, type) {
     els.recordStatusBadge.textContent = text;
-    els.recordStatusBadge.classList.remove('status-ready', 'status-recording', 'status-paused', 'status-error');
+    els.recordStatusBadge.classList.remove(
+      'status-ready',
+      'status-recording',
+      'status-paused',
+      'status-error'
+    );
 
     if (type === 'recording') {
       els.recordStatusBadge.classList.add('status-recording');
@@ -561,28 +879,141 @@
   }
 
   function cleanupStream() {
-    if (state.mediaStream) {
-      state.mediaStream.getTracks().forEach(track => track.stop());
-      state.mediaStream = null;
+    if (!state.mediaStream) return;
+
+    state.mediaStream.getTracks().forEach(track => {
+      try {
+        track.stop();
+      } catch (_) {
+        // 終了処理なので無視する。
+      }
+    });
+
+    state.mediaStream = null;
+  }
+
+  function buildRecordingErrorMessage(error) {
+    const name = error && error.name ? String(error.name) : '';
+    const originalMessage = getErrorMessage(error);
+
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      if (PLATFORM.isIOS) {
+        return (
+          'マイクの使用が許可されていません。\n' +
+          '1. iPhoneの「設定」→「Chrome」→「マイク」をオン\n' +
+          '2. Chromeでこのサイトを開き、アドレスバー左側のマイク権限を許可\n' +
+          '3. Chromeを完全に終了して開き直す\n\n' +
+          '詳細: ' + originalMessage
+        );
+      }
+
+      return (
+        'マイクの使用が許可されていません。\n' +
+        'Chromeの「設定」→「サイトの設定」→「マイク」で、このサイトを許可してください。\n\n' +
+        '詳細: ' + originalMessage
+      );
+    }
+
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return '利用可能なマイクが見つかりません。端末のマイク設定を確認してください。';
+    }
+
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+      return (
+        'マイクを開始できません。通話・録音・カメラなど、マイクを使用中の他アプリを終了してから再試行してください。\n\n' +
+        '詳細: ' + originalMessage
+      );
+    }
+
+    if (name === 'SecurityError') {
+      return '録音にはHTTPS接続とブラウザのマイク許可が必要です。GitHub PagesのURLを直接開いてください。';
+    }
+
+    if (name === 'AbortError') {
+      return 'マイクの開始が中断されました。Chromeを開き直して再試行してください。';
+    }
+
+    if (name === 'InvalidStateError') {
+      return 'ブラウザの状態により録音を開始できません。ページを再読み込みしてください。';
+    }
+
+    if (name === 'NotSupportedError') {
+      return originalMessage;
+    }
+
+    return '録音を開始できませんでした。\n' + originalMessage;
+  }
+
+  function getExtensionFromMimeType(mimeType) {
+    const type = String(mimeType || '').toLowerCase();
+
+    if (type.includes('mp4') || type.includes('m4a')) return 'm4a';
+    if (type.includes('webm')) return 'webm';
+    if (type.includes('ogg')) return 'ogg';
+    if (type.includes('mpeg') || type.includes('mp3')) return 'mp3';
+    if (type.includes('wav')) return 'wav';
+    if (type.includes('aac')) return 'aac';
+
+    return PLATFORM.isIOS ? 'm4a' : 'webm';
+  }
+
+  function safeGetTrackSettings(track) {
+    try {
+      return track && typeof track.getSettings === 'function' ? track.getSettings() : {};
+    } catch (_) {
+      return {};
     }
   }
 
-  function getSupportedAudioMimeType() {
-    const candidates = [
-      'audio/mp4',
-      'audio/aac',
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mpeg'
-    ];
+  function logRecordingEnvironment() {
+    const supportedMimeTypes = getMimeTypeCandidates().filter(isMimeTypeSupported);
 
-    for (const type of candidates) {
-      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) {
-        return type;
-      }
-    }
+    console.info('[record] environment', {
+      platform: PLATFORM,
+      secureContext: window.isSecureContext,
+      hasMediaDevices: Boolean(navigator.mediaDevices),
+      hasGetUserMedia: Boolean(
+        navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function'
+      ),
+      hasMediaRecorder: typeof window.MediaRecorder !== 'undefined',
+      supportedMimeTypes
+    });
+  }
 
-    return '';
+  function detectPlatform() {
+    const ua = navigator.userAgent || '';
+    const platform = navigator.platform || '';
+    const maxTouchPoints = navigator.maxTouchPoints || 0;
+
+    const isIOS =
+      /iPhone|iPad|iPod/i.test(ua) ||
+      (platform === 'MacIntel' && maxTouchPoints > 1);
+
+    const isAndroid = /Android/i.test(ua);
+    const isChromeIOS = /CriOS/i.test(ua);
+    const isChromeAndroid = /Chrome/i.test(ua) && isAndroid;
+
+    return {
+      isIOS,
+      isAndroid,
+      isChromeIOS,
+      isChromeAndroid,
+      browser: isChromeIOS
+        ? 'Chrome iOS'
+        : isChromeAndroid
+          ? 'Chrome Android'
+          : /Safari/i.test(ua) && !/Chrome|CriOS|Android/i.test(ua)
+            ? 'Safari'
+            : 'Other',
+      os: isIOS ? 'iOS/iPadOS' : isAndroid ? 'Android' : 'Other',
+      userAgent: ua
+    };
+  }
+
+  function createNamedError(name, message) {
+    const error = new Error(message);
+    error.name = name;
+    return error;
   }
 
   function openDb() {
@@ -662,7 +1093,7 @@
     return String(error);
   }
 
-  function pad2(n) {
-    return String(n).padStart(2, '0');
+  function pad2(value) {
+    return String(value).padStart(2, '0');
   }
 })();
