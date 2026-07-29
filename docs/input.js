@@ -2,11 +2,11 @@
   'use strict';
 
   const CONFIG = {
-    GAS_WEB_APP_URL: 'https://script.google.com/a/macros/ecodesign-labo.jp/s/AKfycbyXfeS3QTVf_ROlbHnooRfNXITfEz8bkOF6QqHBB4BU0yNNmYwNMBYIcueFKYBVDgU/exec',
     DB_NAME: 'field-report-draft-db',
     DB_VERSION: 1,
     STORE_NAME: 'draft',
-    AUTH_TOKEN_STORAGE_KEY: 'fieldReportAuthToken'
+    AUTH_TOKEN_STORAGE_KEY: 'fieldReportAuthToken',
+    APP_CONTEXT_STORAGE_KEY: 'fieldReportAppContext'
   };
 
   const state = {
@@ -24,20 +24,34 @@
     collectElements();
     bindEvents();
 
-    state.authToken = getAuthTokenFromUrlOrStorage();
-    if (!state.authToken) {
-      showFatalError('認証情報がありません。GAS入口から開き直してください。');
-      return;
-    }
-
     try {
+      const bootstrapContext = consumeBootstrapContext();
+
+      state.authToken = getAuthTokenFromUrlOrStorage();
+      if (!state.authToken) {
+        showFatalError('認証情報がありません。GAS入口から開き直してください。');
+        return;
+      }
+
       state.db = await openDatabase();
-      state.context = await fetchApplicationContext(state.authToken);
-      renderSubmitter(state.context.submitter || state.context.currentUser || {});
+      state.context = bootstrapContext || getStoredApplicationContext();
+
+      if (!state.context) {
+        throw new Error('利用者情報がありません。GAS入口から開き直してください。');
+      }
+
+      const submitter = state.context.submitter || state.context.currentUser || {};
+      if (!submitter.email) {
+        throw new Error('利用者情報にメールアドレスがありません。');
+      }
+
+      renderSubmitter(submitter);
       setAuthStatus('利用者確認完了', 'ready');
       setModeButtonsEnabled(true);
+      showStatus('', '');
+
     } catch (error) {
-      showFatalError('利用者情報を取得できませんでした。\n' + getErrorMessage(error));
+      showFatalError('利用者情報を読み込めませんでした。\n' + getErrorMessage(error));
     }
   }
 
@@ -50,6 +64,22 @@
     elements.textModeButton = document.getElementById('textModeButton');
     elements.audioModeButton = document.getElementById('audioModeButton');
     elements.statusBox = document.getElementById('statusBox');
+
+    const required = [
+      'helpButton',
+      'authStatusBadge',
+      'submitterName',
+      'submitterDepartment',
+      'submitterEmail',
+      'textModeButton',
+      'audioModeButton',
+      'statusBox'
+    ];
+
+    const missing = required.filter(name => !elements[name]);
+    if (missing.length) {
+      throw new Error('input.html に必要な要素がありません: ' + missing.join(', '));
+    }
   }
 
   function bindEvents() {
@@ -100,6 +130,89 @@
     await Promise.all(keys.map(deleteDraft));
   }
 
+  function consumeBootstrapContext() {
+    const rawHash = String(location.hash || '').replace(/^#/, '');
+    if (!rawHash) return null;
+
+    const params = new URLSearchParams(rawHash);
+    const encoded = params.get('bootstrap');
+    if (!encoded) return null;
+
+    try {
+      const payload = JSON.parse(decodeBase64UrlUtf8(encoded));
+
+      if (!payload || !payload.token) {
+        throw new Error('初期情報にtokenがありません。');
+      }
+      if (!payload.submitter || !payload.submitter.email) {
+        throw new Error('初期情報に投稿者情報がありません。');
+      }
+
+      const context = {
+        ok: true,
+        submitter: payload.submitter,
+        currentUser: payload.submitter,
+        departments: Array.isArray(payload.departments) ? payload.departments : [],
+        driveRootFolderId: payload.driveRootFolderId || '',
+        issuedAt: payload.issuedAt || ''
+      };
+
+      sessionStorage.setItem(CONFIG.AUTH_TOKEN_STORAGE_KEY, payload.token);
+      sessionStorage.setItem('fieldReportToken', payload.token);
+      sessionStorage.setItem(CONFIG.APP_CONTEXT_STORAGE_KEY, JSON.stringify(context));
+
+      removeBootstrapFromAddressBar();
+      return context;
+
+    } catch (error) {
+      removeBootstrapFromAddressBar();
+      throw new Error(
+        'GAS入口から受け取った初期情報を解析できませんでした。\n' + getErrorMessage(error)
+      );
+    }
+  }
+
+  function removeBootstrapFromAddressBar() {
+    history.replaceState(
+      {},
+      document.title,
+      location.pathname + location.search
+    );
+  }
+
+  function getStoredApplicationContext() {
+    const raw = sessionStorage.getItem(CONFIG.APP_CONTEXT_STORAGE_KEY);
+    if (!raw) return null;
+
+    try {
+      const context = JSON.parse(raw);
+      return context && context.submitter ? context : null;
+    } catch (_) {
+      sessionStorage.removeItem(CONFIG.APP_CONTEXT_STORAGE_KEY);
+      return null;
+    }
+  }
+
+  function decodeBase64UrlUtf8(value) {
+    const base64 = String(value || '')
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+
+    if (typeof TextDecoder === 'function') {
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+
+    let escaped = '';
+    bytes.forEach(byte => {
+      escaped += '%' + byte.toString(16).padStart(2, '0');
+    });
+    return decodeURIComponent(escaped);
+  }
+
   function renderSubmitter(submitter) {
     elements.submitterName.textContent = submitter.name || '-';
     elements.submitterDepartment.textContent = submitter.department || '-';
@@ -109,7 +222,9 @@
   function setAuthStatus(text, type) {
     elements.authStatusBadge.textContent = text;
     elements.authStatusBadge.classList.remove('status-waiting', 'status-ready', 'status-error');
-    elements.authStatusBadge.classList.add(type === 'ready' ? 'status-ready' : type === 'error' ? 'status-error' : 'status-waiting');
+    elements.authStatusBadge.classList.add(
+      type === 'ready' ? 'status-ready' : type === 'error' ? 'status-error' : 'status-waiting'
+    );
   }
 
   function setModeButtonsEnabled(enabled) {
@@ -142,42 +257,13 @@
       sessionStorage.setItem(CONFIG.AUTH_TOKEN_STORAGE_KEY, tokenFromUrl);
       sessionStorage.setItem('fieldReportToken', tokenFromUrl);
       url.searchParams.delete('token');
-      history.replaceState({}, document.title, url.toString());
+      history.replaceState({}, document.title, url.pathname + url.search + url.hash);
       return tokenFromUrl;
     }
 
     return sessionStorage.getItem(CONFIG.AUTH_TOKEN_STORAGE_KEY)
       || sessionStorage.getItem('fieldReportToken')
       || '';
-  }
-
-  function fetchApplicationContext(token) {
-    return new Promise((resolve, reject) => {
-      const callbackName = '__fieldReportContext_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-      const script = document.createElement('script');
-      const timeoutId = setTimeout(() => finish(new Error('利用者情報の取得がタイムアウトしました。')), 15000);
-
-      function finish(error, value) {
-        clearTimeout(timeoutId);
-        delete window[callbackName];
-        script.remove();
-        error ? reject(error) : resolve(value);
-      }
-
-      window[callbackName] = response => {
-        if (!response || !response.ok) {
-          finish(new Error(response && response.error ? response.error : '利用者情報を取得できませんでした。'));
-          return;
-        }
-        finish(null, response);
-      };
-
-      script.onerror = () => finish(new Error('GASへの接続に失敗しました。'));
-      script.src = CONFIG.GAS_WEB_APP_URL
-        + '?action=context&token=' + encodeURIComponent(token)
-        + '&callback=' + encodeURIComponent(callbackName);
-      document.head.appendChild(script);
-    });
   }
 
   function openDatabase() {
