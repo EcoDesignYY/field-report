@@ -13,6 +13,7 @@
 
     CONSENT_STORAGE_KEY: 'fieldReportDriveConsentGranted',
     AUTH_TOKEN_STORAGE_KEY: 'fieldReportAuthToken',
+    APP_CONTEXT_STORAGE_KEY: 'fieldReportAppContext',
     REQUIRE_IMAGE: false
   };
 
@@ -304,9 +305,22 @@
   }
 
   async function loadApplicationContext() {
-    const context = await fetchApplicationContextByJsonp(state.authToken);
-    if (!context || !context.ok) {
-      throw new Error(context && context.error ? context.error : 'アプリ情報を取得できませんでした。');
+    const raw = sessionStorage.getItem(CONFIG.APP_CONTEXT_STORAGE_KEY);
+
+    if (!raw) {
+      throw new Error('利用者情報がありません。GAS入口から開き直してください。');
+    }
+
+    let context;
+    try {
+      context = JSON.parse(raw);
+    } catch (_) {
+      sessionStorage.removeItem(CONFIG.APP_CONTEXT_STORAGE_KEY);
+      throw new Error('保存された利用者情報を読み込めませんでした。');
+    }
+
+    if (!context || !(context.submitter || context.currentUser)) {
+      throw new Error('保存された利用者情報が不正です。');
     }
 
     state.appContext = context;
@@ -340,28 +354,6 @@
     }
 
     updateUploadButtonState();
-  }
-
-  function fetchApplicationContextByJsonp(token) {
-    return new Promise((resolve, reject) => {
-      const callbackName = '__fieldReportContext_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-      const script = document.createElement('script');
-      const timeoutId = setTimeout(() => finish(new Error('アプリ情報の取得がタイムアウトしました。')), 15000);
-
-      function finish(error, value) {
-        clearTimeout(timeoutId);
-        delete window[callbackName];
-        script.remove();
-        error ? reject(error) : resolve(value);
-      }
-
-      window[callbackName] = response => finish(null, response);
-      script.onerror = () => finish(new Error('GASへの接続に失敗しました。'));
-      script.src = CONFIG.GAS_WEB_APP_URL
-        + '?action=context&token=' + encodeURIComponent(token)
-        + '&callback=' + encodeURIComponent(callbackName);
-      document.head.appendChild(script);
-    });
   }
 
   async function waitForGoogleIdentityServices() {
@@ -851,11 +843,36 @@
       metadata
     };
 
-    await fetch(CONFIG.GAS_WEB_APP_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-      body: JSON.stringify(payload)
+    try {
+      await fetchWithTimeout(CONFIG.GAS_WEB_APP_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: JSON.stringify(payload)
+      }, 12000);
+
+      return { requested: true, warning: '' };
+    } catch (error) {
+      console.warn('[confirm] GAS uploadCompleted notification failed', error);
+      return {
+        requested: false,
+        warning: 'GASへの投稿完了通知に失敗しました。Driveへの保存は完了しています。AI処理トリガーはmetadata.jsonから処理できます。'
+      };
+    }
+  }
+
+  function fetchWithTimeout(url, options, timeoutMs) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+
+    const requestOptions = controller
+      ? { ...options, signal: controller.signal }
+      : options;
+
+    return fetch(url, requestOptions).finally(() => {
+      if (timer) clearTimeout(timer);
     });
   }
 
