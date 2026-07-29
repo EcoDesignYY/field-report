@@ -2,7 +2,7 @@
   'use strict';
 
   const CONFIG = {
-    GAS_WEB_APP_URL: 'https://script.google.com/a/macros/ecodesign-labo.jp/s/AKfycbzyU4I8u5csBb7qRIWvSGwPBrDcYAv0p6rPO6-ModBzPCtwavFeeSaGcOf-TwJeyb7BfQ/exec',
+    GAS_WEB_APP_URL: 'https://script.google.com/a/macros/ecodesign-labo.jp/s/AKfycbyXfeS3QTVf_ROlbHnooRfNXITfEz8bkOF6QqHBB4BU0yNNmYwNMBYIcueFKYBVDgU/exec',
     DB_NAME: 'field-report-draft-db',
     DB_VERSION: 1,
     STORE_NAME: 'draft',
