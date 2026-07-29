@@ -131,12 +131,21 @@
   }
 
   function consumeBootstrapContext() {
-    const rawHash = String(location.hash || '').replace(/^#/, '');
-    if (!rawHash) return null;
+    const url = new URL(location.href);
 
-    const params = new URLSearchParams(rawHash);
-    const encoded = params.get('bootstrap');
-    if (!encoded) return null;
+    // v2: クエリパラメータを優先。v1互換としてフラグメントも読む。
+    let encoded = url.searchParams.get('bootstrap') || '';
+
+    if (!encoded) {
+      const rawHash = String(url.hash || '').replace(/^#/, '');
+      if (rawHash) {
+        encoded = new URLSearchParams(rawHash).get('bootstrap') || '';
+      }
+    }
+
+    if (!encoded) {
+      return null;
+    }
 
     try {
       const payload = JSON.parse(decodeBase64UrlUtf8(encoded));
@@ -154,7 +163,8 @@
         currentUser: payload.submitter,
         departments: Array.isArray(payload.departments) ? payload.departments : [],
         driveRootFolderId: payload.driveRootFolderId || '',
-        issuedAt: payload.issuedAt || ''
+        issuedAt: payload.issuedAt || '',
+        entryVersion: payload.version || 1
       };
 
       sessionStorage.setItem(CONFIG.AUTH_TOKEN_STORAGE_KEY, payload.token);
@@ -173,10 +183,16 @@
   }
 
   function removeBootstrapFromAddressBar() {
+    const url = new URL(location.href);
+    url.searchParams.delete('bootstrap');
+    url.searchParams.delete('token');
+    url.searchParams.delete('entryVersion');
+    url.hash = '';
+
     history.replaceState(
       {},
       document.title,
-      location.pathname + location.search
+      url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '')
     );
   }
 
