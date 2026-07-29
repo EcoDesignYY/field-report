@@ -14,6 +14,11 @@
     CONSENT_STORAGE_KEY: 'fieldReportDriveConsentGranted',
     AUTH_TOKEN_STORAGE_KEY: 'fieldReportAuthToken',
     APP_CONTEXT_STORAGE_KEY: 'fieldReportAppContext',
+
+    DRIVE_TOKEN_TIMEOUT_MS: 12000,
+    DRIVE_STARTUP_RETRY_COUNT: 2,
+    DRIVE_RETRY_DELAY_MS: 1200,
+
     REQUIRE_IMAGE: false
   };
 
@@ -50,6 +55,9 @@
     tokenResponse: null,
     accessToken: '',
     driveReady: false,
+    driveCheckInProgress: false,
+    pendingDriveTokenRequest: null,
+    driveRecheckTimerId: null,
 
     isUploading: false,
     uploadResult: null
@@ -98,11 +106,11 @@
       validateClientConfiguration();
       await waitForGoogleIdentityServices();
       setupDriveTokenClient();
-      await checkDriveAuthorizationOnStartup();
+      prepareDriveAuthorizationOnDemand();
     } catch (error) {
       state.driveReady = false;
-      showDrivePermissionRequired('Google Driveの承認状態を確認できませんでした。');
-      showStatus(getErrorMessage(error), 'warning');
+      setDriveStatus('Drive利用不可', 'error');
+      showStatus('Google Drive認証の準備に失敗しました。\n' + getErrorMessage(error), 'error');
     }
 
     updateUploadButtonState();
@@ -148,7 +156,9 @@
       location.href = './capture.html';
     });
 
-    elements.authorizeDriveButton.addEventListener('click', authorizeDriveByUserAction);
+    // Drive認証はページ表示時に自動実行しない。
+    // 「Google Driveへ投稿」のクリック操作から直接開始し、
+    // iPhoneのポップアップブロックを回避する。
     elements.uploadButton.addEventListener('click', handleUploadClick);
     elements.playAudioButton.addEventListener('click', toggleAudioPlayback);
     elements.targetDepartmentSelect.addEventListener('change', updateUploadButtonState);
@@ -371,8 +381,24 @@
       client_id: CONFIG.GOOGLE_CLIENT_ID,
       scope: CONFIG.DRIVE_SCOPE,
       login_hint: submitter.email || undefined,
-      callback: () => {}
+      callback: handleDriveTokenResponse,
+      error_callback: handleDriveTokenClientError
     });
+  }
+
+  function prepareDriveAuthorizationOnDemand() {
+    state.accessToken = '';
+    state.tokenResponse = null;
+    state.driveReady = false;
+
+    elements.drivePermissionCard.classList.add('hidden');
+    setDriveStatus('投稿時にDrive確認', 'info');
+    showStatus(
+      '内容を確認し、「Google Driveへ投稿」を押してください。\n' +
+      'Driveの確認後、そのまま自動で投稿します。',
+      'info'
+    );
+    updateUploadButtonState();
   }
 
   async function checkDriveAuthorizationOnStartup() {
@@ -381,24 +407,17 @@
       return;
     }
 
-    try {
-      setDriveStatus('Drive確認中', 'waiting');
-      showStatus('Google Driveの承認状態を確認しています...', 'info');
-      await requestDriveAccessToken('none');
-      assertRequiredDriveScope();
-      markDriveReady();
-      showStatus('Google Driveへ保存できます。', 'success');
-    } catch (error) {
-      resetDriveAuthorization();
-      showDrivePermissionRequired('Google Driveの再承認が必要です。');
-      showStatus('「Google Driveを許可する」を押してください。', 'warning');
-    }
+    await verifyDriveAuthorizationAutomatically({
+      retryCount: CONFIG.DRIVE_STARTUP_RETRY_COUNT,
+      showPermissionCardOnFailure: true
+    });
   }
 
   async function authorizeDriveByUserAction() {
     try {
       elements.authorizeDriveButton.disabled = true;
       elements.authorizeDriveButton.textContent = '承認確認中...';
+      setDriveStatus('Drive確認中', 'waiting');
       showStatus('Google Driveの利用許可を確認しています...', 'info');
 
       await requestDriveAccessToken('consent');
@@ -417,25 +436,192 @@
     }
   }
 
-  function requestDriveAccessToken(prompt) {
+  async function verifyDriveAuthorizationAutomatically(options = {}) {
+    if (
+      state.driveReady
+      || state.driveCheckInProgress
+      || state.pendingDriveTokenRequest
+      || !state.tokenClient
+    ) {
+      return state.driveReady;
+    }
+
+    const retryCount = Math.max(0, Number(options.retryCount || 0));
+    const showPermissionCardOnFailure = options.showPermissionCardOnFailure !== false;
+
+    state.driveCheckInProgress = true;
+    setDriveStatus('Drive確認中', 'waiting');
+    showStatus('Google Driveの承認状態を確認しています...', 'info');
+
+    let lastError = null;
+
+    try {
+      for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+        try {
+          await requestDriveAccessToken('none');
+          assertRequiredDriveScope();
+          localStorage.setItem(CONFIG.CONSENT_STORAGE_KEY, '1');
+          markDriveReady();
+          showStatus('Google Driveへ保存できます。', 'success');
+          return true;
+        } catch (error) {
+          lastError = error;
+
+          if (attempt < retryCount) {
+            await sleep(CONFIG.DRIVE_RETRY_DELAY_MS * (attempt + 1));
+          }
+        }
+      }
+
+      // タイムアウト後にGoogle側のcallbackが遅れて返る場合があるため、
+      // 既存の承認済みフラグは削除せず、自動再確認できる状態を維持する。
+      state.driveReady = false;
+      setDriveStatus('Drive確認待ち', 'waiting');
+
+      if (showPermissionCardOnFailure) {
+        elements.drivePermissionCard.classList.remove('hidden');
+      }
+
+      showStatus(
+        'Driveの確認に時間がかかっています。確認が完了すると自動で「Drive保存準備完了」に切り替わります。\n' +
+        '切り替わらない場合は「Google Driveを許可する」を押してください。' +
+        (lastError ? '\n詳細: ' + getErrorMessage(lastError) : ''),
+        'warning'
+      );
+      updateUploadButtonState();
+      return false;
+    } finally {
+      state.driveCheckInProgress = false;
+    }
+  }
+
+  function scheduleDriveAuthorizationRecheck(delayMs) {
+    if (
+      state.driveReady
+      || state.driveCheckInProgress
+      || state.pendingDriveTokenRequest
+      || state.isUploading
+      || !state.tokenClient
+      || localStorage.getItem(CONFIG.CONSENT_STORAGE_KEY) !== '1'
+    ) {
+      return;
+    }
+
+    if (state.driveRecheckTimerId) {
+      clearTimeout(state.driveRecheckTimerId);
+    }
+
+    state.driveRecheckTimerId = setTimeout(() => {
+      state.driveRecheckTimerId = null;
+      verifyDriveAuthorizationAutomatically({
+        retryCount: 1,
+        showPermissionCardOnFailure: false
+      }).catch(error => {
+        console.warn('[drive] automatic recheck failed', error);
+      });
+    }, Math.max(0, Number(delayMs || 0)));
+  }
+
+  function requestDriveAccessToken(prompt, timeoutMs = CONFIG.DRIVE_TOKEN_TIMEOUT_MS) {
     if (!state.tokenClient) {
       return Promise.reject(new Error('Google認証クライアントが初期化されていません。'));
     }
 
-    return new Promise((resolve, reject) => {
-      state.tokenClient.callback = response => {
-        if (!response || response.error) {
-          reject(new Error(response && (response.error_description || response.error) || 'Google Driveの認証に失敗しました。'));
-          return;
-        }
+    if (state.pendingDriveTokenRequest) {
+      return state.pendingDriveTokenRequest.promise;
+    }
 
-        state.tokenResponse = response;
-        state.accessToken = response.access_token || '';
-        state.accessToken ? resolve(state.accessToken) : reject(new Error('Google Driveアクセストークンを取得できませんでした。'));
-      };
+    let resolvePromise;
+    let rejectPromise;
 
-      state.tokenClient.requestAccessToken({ prompt: prompt == null ? '' : String(prompt) });
+    const promise = new Promise((resolve, reject) => {
+      resolvePromise = resolve;
+      rejectPromise = reject;
     });
+
+    const timeoutId = setTimeout(() => {
+      const pending = state.pendingDriveTokenRequest;
+      if (!pending || pending.promise !== promise) return;
+
+      state.pendingDriveTokenRequest = null;
+      const error = new Error('Google Driveの確認がタイムアウトしました。');
+      error.code = 'DRIVE_AUTH_TIMEOUT';
+      rejectPromise(error);
+    }, Math.max(3000, Number(timeoutMs || CONFIG.DRIVE_TOKEN_TIMEOUT_MS)));
+
+    state.pendingDriveTokenRequest = {
+      promise,
+      resolve: resolvePromise,
+      reject: rejectPromise,
+      timeoutId
+    };
+
+    try {
+      state.tokenClient.requestAccessToken({
+        prompt: prompt == null ? '' : String(prompt)
+      });
+    } catch (error) {
+      settlePendingDriveTokenRequest(error);
+    }
+
+    return promise;
+  }
+
+  function handleDriveTokenResponse(response) {
+    if (!response || response.error) {
+      const error = new Error(
+        response && (response.error_description || response.error)
+          ? response.error_description || response.error
+          : 'Google Driveの認証に失敗しました。'
+      );
+      settlePendingDriveTokenRequest(error);
+      return;
+    }
+
+    const accessToken = response.access_token || '';
+    if (!accessToken) {
+      settlePendingDriveTokenRequest(new Error('Google Driveアクセストークンを取得できませんでした。'));
+      return;
+    }
+
+    state.tokenResponse = response;
+    state.accessToken = accessToken;
+    localStorage.setItem(CONFIG.CONSENT_STORAGE_KEY, '1');
+
+    // callbackがタイムアウト後に遅れて返った場合でも、ここで画面を自動更新する。
+    markDriveReady();
+    showStatus('Google Driveへ保存できます。', 'success');
+
+    settlePendingDriveTokenRequest(null, accessToken);
+  }
+
+  function handleDriveTokenClientError(error) {
+    const message = error && (error.message || error.type)
+      ? String(error.message || error.type)
+      : 'Google Drive認証画面を開始できませんでした。';
+
+    const authError = new Error(message);
+
+    if (state.isUploading) {
+      finishDriveAuthorizationFailure(authError);
+      return;
+    }
+
+    settlePendingDriveTokenRequest(authError);
+  }
+
+  function settlePendingDriveTokenRequest(error, value) {
+    const pending = state.pendingDriveTokenRequest;
+    if (!pending) return;
+
+    state.pendingDriveTokenRequest = null;
+    clearTimeout(pending.timeoutId);
+
+    if (error) {
+      pending.reject(error);
+    } else {
+      pending.resolve(value);
+    }
   }
 
   function assertRequiredDriveScope() {
@@ -479,26 +665,122 @@
     );
   }
 
-  async function handleUploadClick() {
+  function handleUploadClick() {
     if (state.isUploading || !validateBeforeUpload()) return;
 
     state.isUploading = true;
     updateUploadButtonState();
-    showStatus('Google Driveへ投稿しています...', 'info');
+
+    // すでにこのページ内でアクセストークンを取得済みなら、そのまま投稿する。
+    if (state.accessToken && state.driveReady) {
+      uploadAfterDriveAuthorization();
+      return;
+    }
+
+    // 重要：requestAccessToken()をクリックイベントの同期処理内で直接呼ぶ。
+    // ページロードやタイマーから呼ぶと、iPhoneではポップアップとして遮断されやすい。
+    requestDriveAuthorizationFromUploadClick();
+  }
+
+  function requestDriveAuthorizationFromUploadClick() {
+    if (!state.tokenClient) {
+      finishDriveAuthorizationFailure(
+        new Error('Google認証クライアントが初期化されていません。')
+      );
+      return;
+    }
+
+    setDriveStatus('Drive確認中', 'waiting');
+    showStatus('Google Driveの承認状態を確認しています...', 'info');
+
+    state.tokenClient.callback = response => {
+      if (!response || response.error) {
+        finishDriveAuthorizationFailure(new Error(
+          response && (response.error_description || response.error)
+            ? response.error_description || response.error
+            : 'Google Driveの認証に失敗しました。'
+        ));
+        return;
+      }
+
+      const accessToken = response.access_token || '';
+      if (!accessToken) {
+        finishDriveAuthorizationFailure(
+          new Error('Google Driveアクセストークンを取得できませんでした。')
+        );
+        return;
+      }
+
+      state.tokenResponse = response;
+      state.accessToken = accessToken;
+
+      try {
+        assertRequiredDriveScope();
+      } catch (error) {
+        finishDriveAuthorizationFailure(error);
+        return;
+      }
+
+      localStorage.setItem(CONFIG.CONSENT_STORAGE_KEY, '1');
+      markDriveReady();
+      showStatus('Google Driveへ投稿しています...', 'info');
+      uploadAfterDriveAuthorization();
+    };
+
+    const hasConsent = localStorage.getItem(CONFIG.CONSENT_STORAGE_KEY) === '1';
 
     try {
-      const result = await uploadReportWithReauthorization();
+      state.tokenClient.requestAccessToken({
+        prompt: hasConsent ? '' : 'consent'
+      });
+    } catch (error) {
+      finishDriveAuthorizationFailure(error);
+    }
+  }
+
+  async function uploadAfterDriveAuthorization() {
+    try {
+      const result = await uploadReportCore();
       state.uploadResult = result;
       await putDraft('uploadResult', result);
       renderUploadResult(result);
-      showStatus('投稿が完了しました。Teams受付通知とAI解析はGAS側で順次実行されます。', 'success');
+      showStatus(
+        '投稿が完了しました。Teams受付通知とAI解析はGAS側で順次実行されます。',
+        'success'
+      );
     } catch (error) {
       console.error(error);
-      showStatus('投稿に失敗しました。\n' + getErrorMessage(error), 'error');
+
+      if (isAuthorizationError(error)) {
+        resetDriveAuthorization();
+        setDriveStatus('投稿時に再確認', 'info');
+        showStatus(
+          'Google Driveの認証期限が切れました。もう一度「Google Driveへ投稿」を押してください。',
+          'warning'
+        );
+      } else {
+        showStatus('投稿に失敗しました。\n' + getErrorMessage(error), 'error');
+      }
     } finally {
       state.isUploading = false;
       updateUploadButtonState();
     }
+  }
+
+  function finishDriveAuthorizationFailure(error) {
+    state.isUploading = false;
+    state.driveReady = false;
+    state.accessToken = '';
+    state.tokenResponse = null;
+
+    setDriveStatus('投稿時に再確認', 'info');
+    showStatus(
+      'Google Driveの確認を完了できませんでした。\n' +
+      'もう一度「Google Driveへ投稿」を押してください。\n' +
+      getErrorMessage(error),
+      'warning'
+    );
+    updateUploadButtonState();
   }
 
   function validateBeforeUpload() {
@@ -516,10 +798,6 @@
     }
     if (!elements.targetDepartmentSelect.value) {
       showStatus('対象部署を選択してください。', 'error');
-      return false;
-    }
-    if (!state.driveReady) {
-      showDrivePermissionRequired('投稿前にGoogle Driveを許可してください。');
       return false;
     }
     return true;
@@ -907,17 +1185,25 @@
     const hasImage = Boolean(state.imageBlob);
     const hasDepartment = Boolean(elements.targetDepartmentSelect.value);
 
+    // Drive認証前でも投稿ボタンは押せるようにする。
+    // ボタンのクリック操作をそのままOAuth開始のユーザー操作として利用する。
     const canUpload = !state.isUploading
       && !state.uploadResult
-      && state.driveReady
       && hasDepartment
       && hasSource
       && (!CONFIG.REQUIRE_IMAGE || hasImage);
 
     elements.uploadButton.disabled = !canUpload;
-    if (state.isUploading) elements.uploadButton.textContent = '投稿中...';
-    else if (state.uploadResult) elements.uploadButton.textContent = '投稿済み';
-    else elements.uploadButton.textContent = 'Google Driveへ投稿';
+
+    if (state.isUploading) {
+      elements.uploadButton.textContent = state.driveReady
+        ? '投稿中...'
+        : 'Drive確認中...';
+    } else if (state.uploadResult) {
+      elements.uploadButton.textContent = '投稿済み';
+    } else {
+      elements.uploadButton.textContent = 'Google Driveへ投稿';
+    }
   }
 
   function setFatalState(message) {
