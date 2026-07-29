@@ -3,7 +3,7 @@
 
   const CONFIG = {
     GOOGLE_CLIENT_ID: '866457692941-cro6etg365bkgq6m0qpor789677g11lq.apps.googleusercontent.com',
-    GAS_WEB_APP_URL: 'https://script.google.com/a/macros/ecodesign-labo.jp/s/AKfycbzyU4I8u5csBb7qRIWvSGwPBrDcYAv0p6rPO6-ModBzPCtwavFeeSaGcOf-TwJeyb7BfQ/exec',
+    GAS_WEB_APP_URL: 'https://script.google.com/a/macros/ecodesign-labo.jp/s/AKfycbyXfeS3QTVf_ROlbHnooRfNXITfEz8bkOF6QqHBB4BU0yNNmYwNMBYIcueFKYBVDgU/exec',
     DRIVE_ROOT_FOLDER_ID: '1oRhXuGn0YE1C-eKyG7MHNObLr1ficZ-p',
     DRIVE_SCOPE: 'https://www.googleapis.com/auth/drive',
 
