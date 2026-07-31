@@ -19,7 +19,9 @@
     DRIVE_STARTUP_RETRY_COUNT: 2,
     DRIVE_RETRY_DELAY_MS: 1200,
 
-    REQUIRE_IMAGE: false
+    REQUIRE_IMAGE: false,
+    FIRST_PAGE_URL: './input.html',
+    AUTO_RETURN_DELAY_MS: 3000
   };
 
   const FALLBACK_DEPARTMENTS = [
@@ -60,7 +62,8 @@
     driveRecheckTimerId: null,
 
     isUploading: false,
-    uploadResult: null
+    uploadResult: null,
+    returnTimerId: null
   };
 
   const elements = {};
@@ -148,6 +151,8 @@
     elements.uploadButton = document.getElementById('uploadButton');
     elements.resultCard = document.getElementById('resultCard');
     elements.folderLink = document.getElementById('folderLink');
+    elements.returnToStartButton = document.getElementById('returnToStartButton');
+    elements.autoReturnText = document.getElementById('autoReturnText');
     elements.statusBox = document.getElementById('statusBox');
   }
 
@@ -160,6 +165,9 @@
     // 「Google Driveへ投稿」のクリック操作から直接開始し、
     // iPhoneのポップアップブロックを回避する。
     elements.uploadButton.addEventListener('click', handleUploadClick);
+    if (elements.returnToStartButton) {
+      elements.returnToStartButton.addEventListener('click', returnToFirstPage);
+    }
     elements.playAudioButton.addEventListener('click', toggleAudioPlayback);
     elements.targetDepartmentSelect.addEventListener('change', updateUploadButtonState);
 
@@ -1161,6 +1169,83 @@
     elements.uploadButton.disabled = true;
     elements.uploadButton.textContent = '投稿済み';
     window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    startAutoReturnCountdown();
+  }
+
+  function startAutoReturnCountdown() {
+    if (state.returnTimerId) {
+      clearInterval(state.returnTimerId);
+      state.returnTimerId = null;
+    }
+
+    const delayMs = Number(CONFIG.AUTO_RETURN_DELAY_MS || 0);
+    if (delayMs <= 0) return;
+
+    const startedAt = Date.now();
+
+    const updateText = () => {
+      const remainingMs = Math.max(0, delayMs - (Date.now() - startedAt));
+      const remainingSec = Math.ceil(remainingMs / 1000);
+
+      if (elements.autoReturnText) {
+        elements.autoReturnText.textContent = remainingSec > 0
+          ? remainingSec + '秒後に最初の画面へ戻ります。'
+          : '最初の画面へ戻ります。';
+      }
+
+      if (remainingMs <= 0) {
+        clearInterval(state.returnTimerId);
+        state.returnTimerId = null;
+        returnToFirstPage();
+      }
+    };
+
+    updateText();
+    state.returnTimerId = setInterval(updateText, 250);
+  }
+
+  async function returnToFirstPage() {
+    if (state.returnTimerId) {
+      clearInterval(state.returnTimerId);
+      state.returnTimerId = null;
+    }
+
+    try {
+      await clearDraftStore();
+    } catch (error) {
+      console.warn('投稿データの初期化に失敗しました。', error);
+    }
+
+    revokePreviewObjectUrls();
+    location.replace(CONFIG.FIRST_PAGE_URL);
+  }
+
+  function clearDraftStore() {
+    return new Promise((resolve, reject) => {
+      if (!state.db) {
+        resolve();
+        return;
+      }
+
+      const transaction = state.db.transaction(CONFIG.STORE_NAME, 'readwrite');
+      const request = transaction.objectStore(CONFIG.STORE_NAME).clear();
+
+      request.onsuccess = () => resolve();
+      request.onerror = event => reject(event.target.error || new Error('投稿データを初期化できませんでした。'));
+      transaction.onerror = event => reject(event.target.error || new Error('投稿データの初期化トランザクションに失敗しました。'));
+    });
+  }
+
+  function revokePreviewObjectUrls() {
+    if (state.audioObjectUrl) {
+      URL.revokeObjectURL(state.audioObjectUrl);
+      state.audioObjectUrl = '';
+    }
+
+    if (state.imageObjectUrl) {
+      URL.revokeObjectURL(state.imageObjectUrl);
+      state.imageObjectUrl = '';
+    }
   }
 
   function toggleAudioPlayback() {
