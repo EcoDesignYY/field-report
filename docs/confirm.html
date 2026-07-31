@@ -7,6 +7,11 @@
 
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <link rel="stylesheet" href="./confirm.css?v=readable-old-ui-v4">
+
+  <style>
+    .return-button { width: 100%; margin-top: 12px; }
+    .auto-return-text { margin: 10px 0 0; text-align: center; font-size: 13px; color: #6b7280; }
+  </style>
 </head>
 <body>
   <div class="app-shell">
@@ -108,6 +113,8 @@
         <h2>投稿完了</h2>
         <p>Google Driveへの保存とGASへの投稿完了通知を実行しました。</p>
         <a id="folderLink" class="folder-link" href="#" target="_blank" rel="noopener">投稿フォルダを開く</a>
+        <button id="returnToStartButton" type="button" class="secondary-button return-button">最初の画面へ戻る</button>
+        <p id="autoReturnText" class="auto-return-text">3秒後に最初の画面へ戻ります。</p>
       </section>
 
       <div id="statusBox" class="status-box hidden"></div>
@@ -118,6 +125,6 @@
     </footer>
   </div>
 
-  <script src="./confirm.js?v=drive-click-auth-v4"></script>
+  <script src="./confirm.js?v=return-first-v5"></script>
 </body>
 </html>
