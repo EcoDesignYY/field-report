@@ -2,60 +2,109 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  >
   <title>入力方法選択</title>
-  <link rel="stylesheet" href="./input.css?v=readable-old-ui-v4">
+  <link
+    rel="stylesheet"
+    href="./input.css?v=workflow-v151-readable"
+  >
 </head>
 <body>
   <div class="app-shell">
     <header class="top-bar">
       <div class="top-spacer"></div>
       <div class="top-title">入力方法選択</div>
-      <button id="helpButton" type="button" class="top-button">ヘルプ</button>
+      <button
+        id="helpButton"
+        type="button"
+        class="top-button"
+      >
+        ヘルプ
+      </button>
     </header>
 
     <main class="content">
       <section class="hero-card">
-        <div id="authStatusBadge" class="status-badge status-waiting">利用者確認中</div>
+        <div
+          id="authStatusBadge"
+          class="status-badge status-waiting"
+        >
+          利用者確認中
+        </div>
         <h1>問題内容の入力方法を選択</h1>
-        <p>短い内容はテキスト、現場で手入力しづらい場合は録音を選択してください。</p>
+        <p>
+          短い内容はテキスト、現場で手入力しづらい場合は録音を選択してください。
+        </p>
       </section>
 
       <section class="user-card">
         <h2>投稿者</h2>
+
         <div class="info-grid">
           <div>
             <div class="label">氏名</div>
             <div id="submitterName" class="value">取得中...</div>
           </div>
+
           <div>
             <div class="label">所属部署</div>
             <div id="submitterDepartment" class="value">取得中...</div>
           </div>
         </div>
-        <div id="submitterEmail" class="email-line">取得中...</div>
+
+        <div id="submitterEmail" class="email-line">
+          取得中...
+        </div>
       </section>
 
       <section class="choice-grid" aria-label="入力方法">
-        <button id="textModeButton" type="button" class="choice-card" disabled>
+        <button
+          id="textModeButton"
+          type="button"
+          class="choice-card"
+          disabled
+        >
           <span class="choice-icon" aria-hidden="true">文</span>
           <span class="choice-title">テキスト入力</span>
-          <span class="choice-description">文章を直接入力します。文字起こし処理は行いません。</span>
+          <span class="choice-description">
+            文章を直接入力し、資料を最大5件・合計12MiBまで添付できます。
+          </span>
         </button>
 
-        <button id="audioModeButton" type="button" class="choice-card" disabled>
-          <span class="choice-icon choice-icon-audio" aria-hidden="true">●</span>
+        <button
+          id="audioModeButton"
+          type="button"
+          class="choice-card"
+          disabled
+        >
+          <span
+            class="choice-icon choice-icon-audio"
+            aria-hidden="true"
+          >
+            ●
+          </span>
           <span class="choice-title">録音</span>
-          <span class="choice-description">音声で状況を説明します。投稿後に文字起こしします。</span>
+          <span class="choice-description">
+            30秒から2分の音声で状況を説明し、投稿後に文字起こしします。
+          </span>
         </button>
       </section>
 
       <section class="tips-card">
         <h2>選択の目安</h2>
         <ul>
-          <li>内容を短く整理できる場合はテキスト入力が適しています。</li>
-          <li>機械を見ながら説明する場合や手袋着用時は録音が適しています。</li>
-          <li>どちらを選んでも、画像の撮影・添付へ進めます。</li>
+          <li>
+            資料・動画・コードなどを添付する場合はテキスト入力を選択してください。
+          </li>
+          <li>
+            機械を見ながら説明する場合や手袋着用時は録音が適しています。
+          </li>
+          <li>
+            どちらを選んでも、次の画面で現場写真を撮影できます。
+          </li>
         </ul>
       </section>
 
@@ -63,6 +112,6 @@
     </main>
   </div>
 
-  <script src="./input.js?v=bootstrap-context-fix-v1"></script>
+  <script src="./input.js?v=workflow-v151-readable"></script>
 </body>
 </html>
