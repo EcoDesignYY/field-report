@@ -2,83 +2,153 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  >
   <title>撮影・添付</title>
-  <link rel="stylesheet" href="./capture.css?v=readable-old-ui-v4">
+  <link
+    rel="stylesheet"
+    href="./capture.css?v=workflow-v151-readable"
+  >
 </head>
 <body>
   <div class="app-shell">
     <header class="top-bar">
-      <button id="backButton" type="button" class="top-button">戻る</button>
+      <button
+        id="backButton"
+        type="button"
+        class="top-button"
+      >
+        戻る
+      </button>
       <div class="top-title">撮影・添付</div>
-      <button id="helpButton" type="button" class="top-button">ヘルプ</button>
+      <button
+        id="helpButton"
+        type="button"
+        class="top-button"
+      >
+        ヘルプ
+      </button>
     </header>
 
     <main class="content">
       <section class="hero-card">
-        <div id="cameraStatusBadge" class="status-badge status-ready">カメラ準備中</div>
+        <div
+          id="cameraStatusBadge"
+          class="status-badge status-ready"
+        >
+          画像は任意です
+        </div>
         <h1>現場の状況を写真で記録</h1>
-        <p>対象が分かるように撮影してください。画像なしでも次へ進めます。</p>
+        <p>
+          対象が分かるように撮影してください。画像なしでも次へ進めます。
+        </p>
       </section>
 
       <section class="camera-card">
         <div class="preview-card">
-          <video id="cameraVideo" autoplay playsinline muted></video>
-          <img id="imagePreview" alt="撮影画像プレビュー" class="hidden">
-          <div id="emptyPreview" class="empty-preview">カメラを起動、または画像を選択してください</div>
-
-          <div id="gridOverlay" class="grid-overlay hidden"></div>
-
-          <div class="preview-top">
-            <button id="gridToggleButton" type="button" class="top-badge">グリッド OFF</button>
-            <span id="zoomBadge" class="top-badge hidden">1.0x</span>
+          <video
+            id="cameraVideo"
+            autoplay
+            playsinline
+            muted
+            class="hidden"
+          ></video>
+          <img
+            id="imagePreview"
+            alt="撮影画像プレビュー"
+            class="hidden"
+          >
+          <div id="emptyPreview" class="empty-preview">
+            カメラを起動、または画像を選択してください
           </div>
-        </div>
-
-        <div id="zoomControl" class="zoom-control hidden">
-          <div class="zoom-head">
-            <span>倍率</span>
-            <span id="zoomValueText">1.0x</span>
-          </div>
-          <input id="zoomRange" class="zoom-range" type="range" min="1" max="1" step="0.1" value="1">
+          <canvas id="captureCanvas" class="hidden"></canvas>
         </div>
 
         <div class="capture-controls">
-          <button id="startCameraButton" type="button" class="secondary-button">カメラ起動</button>
-          <button id="captureButton" type="button" class="shutter-button" disabled aria-label="撮影"></button>
-          <button id="fileSelectButton" type="button" class="secondary-button">画像を選択</button>
+          <button
+            id="startCameraButton"
+            type="button"
+            class="secondary-button"
+          >
+            カメラ起動
+          </button>
+          <button
+            id="captureButton"
+            type="button"
+            class="primary-button"
+            disabled
+          >
+            撮影
+          </button>
+          <button
+            id="fileSelectButton"
+            type="button"
+            class="secondary-button"
+          >
+            画像を選択
+          </button>
         </div>
 
         <div class="sub-controls">
-          <button id="resetImageButton" type="button" class="secondary-button" disabled>画像を削除</button>
-          <button id="stopCameraButton" type="button" class="secondary-button" disabled>カメラ停止</button>
+          <button
+            id="resetImageButton"
+            type="button"
+            class="secondary-button"
+            disabled
+          >
+            画像を削除
+          </button>
+          <button
+            id="stopCameraButton"
+            type="button"
+            class="secondary-button"
+            disabled
+          >
+            カメラ停止
+          </button>
         </div>
 
-        <input id="imageFileInput" type="file" accept="image/*" capture="environment" class="hidden">
+        <input
+          id="imageFileInput"
+          type="file"
+          accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+          class="hidden"
+        >
+
+        <div class="image-info">
+          <strong id="imageSizeText">画像なし</strong>
+          <span id="totalUsageText">
+            投稿ファイル合計 0 B / 12 MiB
+          </span>
+        </div>
       </section>
 
       <section class="memo-card">
-        <label for="imageMemoInput">画像メモ</label>
-        <textarea id="imageMemoInput" rows="4" placeholder="補足があれば入力してください。例：ベルト右側、擦れ跡あり"></textarea>
-      </section>
-
-      <section class="tips-card">
-        <h2>撮影の目安</h2>
-        <ul>
-          <li>対象物の全体と、問題箇所が分かる角度で撮影してください。</li>
-          <li>暗い場合はライトを使用してください。</li>
-          <li>画像が不要な場合は、そのまま次へ進めます。</li>
-        </ul>
+        <label for="imageMemoInput">備考欄</label>
+        <textarea
+          id="imageMemoInput"
+          rows="3"
+          placeholder="例：第二ライン右側、赤丸部分に摩耗あり"
+        ></textarea>
       </section>
 
       <div id="statusBox" class="status-box hidden"></div>
     </main>
 
     <footer class="bottom-actions">
-      <button id="nextButton" type="button" class="primary-button">この内容で次へ</button>
+      <button
+        id="nextButton"
+        type="button"
+        class="primary-button"
+      >
+        確認へ進む
+      </button>
     </footer>
   </div>
 
-  <script src="./capture.js?v=readable-old-ui-v4"></script>
+  <script src="./attachment-rules.js?v=workflow-v151-readable"></script>
+  <script src="./capture.js?v=workflow-v151-readable"></script>
 </body>
 </html>
