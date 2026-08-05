@@ -2,47 +2,103 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  >
   <title>録音</title>
-  <link rel="stylesheet" href="./record.css?v=readable-old-ui-v4">
+  <link
+    rel="stylesheet"
+    href="./record.css?v=workflow-v151-readable"
+  >
 </head>
 <body>
   <div class="app-shell">
     <header class="top-bar">
-      <button id="backButton" type="button" class="top-button">戻る</button>
+      <button
+        id="backButton"
+        type="button"
+        class="top-button"
+      >
+        戻る
+      </button>
       <div class="top-title">録音</div>
-      <button id="helpButton" type="button" class="top-button">ヘルプ</button>
+      <button
+        id="helpButton"
+        type="button"
+        class="top-button"
+      >
+        ヘルプ
+      </button>
     </header>
 
     <main class="content">
       <section class="hero-card">
-        <div id="recordStatusBadge" class="status-badge status-ready">マイク準備中</div>
+        <div
+          id="recordStatusBadge"
+          class="status-badge status-ready"
+        >
+          マイク準備中
+        </div>
         <h1>現場の状況を音声で記録</h1>
-        <p>異音・不具合・違和感などを、見たまま・聞いたまま話してください。</p>
+        <p>
+          異音・不具合・違和感などを、見たまま・聞いたまま話してください。
+        </p>
       </section>
 
       <section class="recorder-card">
         <div id="timerText" class="timer">00:00</div>
 
         <div class="wave-wrap">
-          <canvas id="waveCanvas" width="600" height="150" aria-label="録音波形"></canvas>
+          <canvas
+            id="waveCanvas"
+            width="600"
+            height="150"
+            aria-label="録音波形"
+          ></canvas>
         </div>
 
         <div class="main-control">
-          <button id="recordButton" type="button" class="record-button" aria-label="録音開始">
+          <button
+            id="recordButton"
+            type="button"
+            class="record-button"
+            aria-label="録音開始"
+          >
             <span id="recordIcon" class="record-icon"></span>
           </button>
           <div id="recordLabel" class="record-label">録音開始</div>
         </div>
 
         <div class="sub-controls">
-          <button id="pauseButton" type="button" class="secondary-button" disabled>一時停止</button>
-          <button id="resetButton" type="button" class="secondary-button" disabled>やり直し</button>
+          <button
+            id="pauseButton"
+            type="button"
+            class="secondary-button"
+            disabled
+          >
+            一時停止
+          </button>
+          <button
+            id="resetButton"
+            type="button"
+            class="secondary-button"
+            disabled
+          >
+            やり直し
+          </button>
         </div>
 
         <div id="audioPreviewArea" class="audio-preview hidden">
           <div class="audio-player">
-            <button id="playAudioButton" type="button" class="secondary-button compact" disabled>再生</button>
+            <button
+              id="playAudioButton"
+              type="button"
+              class="secondary-button compact"
+              disabled
+            >
+              再生
+            </button>
             <span id="audioPlayStatus">未録音</span>
           </div>
           <audio id="audioPlayer" preload="metadata"></audio>
@@ -51,15 +107,25 @@
 
       <section class="memo-card">
         <label for="audioMemoInput">録音メモ</label>
-        <textarea id="audioMemoInput" rows="4" placeholder="補足があれば入力してください。例：第二ライン右側、朝一から異音あり"></textarea>
+        <textarea
+          id="audioMemoInput"
+          rows="4"
+          placeholder="補足があれば入力してください。例：第二ライン右側、朝一から異音あり"
+        ></textarea>
       </section>
 
       <section class="tips-card">
         <h2>録音の目安</h2>
         <ul>
-          <li>30秒〜2分程度を目安にしてください。</li>
-          <li>対象物・発生場所・いつから起きたかを話すとAI整理しやすくなります。</li>
-          <li>録音中はカメラを停止するため、録音後に撮影へ進みます。</li>
+          <li>
+            録音時間は30秒以上2分以内です。2分に達すると自動停止します。
+          </li>
+          <li>
+            対象物・発生場所・いつから起きたかを話すとAI整理しやすくなります。
+          </li>
+          <li>
+            録音中はカメラを停止するため、録音後に撮影へ進みます。
+          </li>
         </ul>
       </section>
 
@@ -67,10 +133,17 @@
     </main>
 
     <footer class="bottom-actions">
-      <button id="nextButton" type="button" class="primary-button" disabled>保存して次へ</button>
+      <button
+        id="nextButton"
+        type="button"
+        class="primary-button"
+        disabled
+      >
+        保存して次へ
+      </button>
     </footer>
   </div>
 
-  <script src="./record.js?v=mobile-chrome-audio-fix-v1"></script>
+  <script src="./record.js?v=workflow-v151-readable"></script>
 </body>
 </html>
