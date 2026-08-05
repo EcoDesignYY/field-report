@@ -6,6 +6,7 @@
     DB_VERSION: 1,
     STORE_NAME: 'draft',
     AUTH_TOKEN_STORAGE_KEY: 'fieldReportAuthToken',
+    MIN_RECORDING_SECONDS: 30,
     MAX_RECORDING_SECONDS: 120,
     NEXT_PAGE_URL: './capture.html',
     PREVIOUS_PAGE_URL: './input.html'
@@ -43,6 +44,10 @@
   document.addEventListener('DOMContentLoaded', init);
   window.addEventListener('pagehide', releaseRecordingResources);
 
+  // ---------------------------------------------------------------------------
+  // Page initialization
+  // ---------------------------------------------------------------------------
+
   async function init() {
     collectElements();
     bindEvents();
@@ -60,6 +65,7 @@
       await putDraft('inputMode', 'audio');
       await deleteDraft('textBody');
       await deleteDraft('textMeta');
+      await deleteDraft('attachments');
 
       clearWaveform();
       await loadExistingDraft();
@@ -127,6 +133,7 @@
     els.helpButton.addEventListener('click', () => {
       setStatus(
         '録音ボタンを押すと録音を開始します。もう一度押すと停止します。\n' +
+        '録音は短時間でも保存できます。2分で自動停止します。\n' +
         'マイク許可を求められた場合は「許可」を選択してください。',
         'info'
       );
@@ -182,6 +189,10 @@
       await stopRecording();
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Recording lifecycle
+  // ---------------------------------------------------------------------------
 
   async function startRecording() {
     const sequence = ++state.recordingSequence;
@@ -272,6 +283,10 @@
       console.error('[record] start failed', error);
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Browser and MIME compatibility
+  // ---------------------------------------------------------------------------
 
   function validateRecordingEnvironment() {
     if (!window.isSecureContext) {
@@ -401,27 +416,44 @@
     }
   }
 
-  async function stopRecording() {
+  async function stopRecording(autoStopped = false) {
     const recorder = state.mediaRecorder;
 
-    if (!recorder) return;
+    if (!recorder || state.status === 'stopping') return;
 
     try {
       if (state.status === 'recording') {
         state.elapsedMs += Date.now() - state.startedAt;
       }
 
+      state.elapsedMs = Math.min(
+        state.elapsedMs,
+        CONFIG.MAX_RECORDING_SECONDS * 1000
+      );
+
+      state.status = 'stopping';
       stopTimer();
       setRecordStatus('録音を保存中', 'ready');
       els.recordButton.disabled = true;
       els.pauseButton.disabled = true;
+      els.resetButton.disabled = true;
+      els.nextButton.disabled = true;
+
+      if (autoStopped) {
+        setStatus(
+          '2分に達したため、録音を自動停止しました。保存処理が終わるまでお待ちください。',
+          'warning'
+        );
+      }
 
       if (recorder.state !== 'inactive') {
         recorder.stop();
       }
     } catch (error) {
+      state.status = 'idle';
       els.recordButton.disabled = false;
       setStatus('録音停止に失敗しました。\n' + getErrorMessage(error), 'error');
+      renderState();
     }
   }
 
@@ -472,6 +504,12 @@
     els.audioPlayStatus.textContent = '再生できます';
 
     renderState();
+
+    if (state.elapsedMs >= CONFIG.MAX_RECORDING_SECONDS * 1000) {
+      setStatus('2分の録音が完了しました。内容を確認して次へ進んでください。', 'success');
+    } else {
+      setStatus('録音が完了しました。内容を確認して次へ進んでください。', 'success');
+    }
 
     console.info('[record] stopped', {
       mimeType: actualMimeType,
@@ -580,6 +618,10 @@
     cleanupStream();
   }
 
+  // ---------------------------------------------------------------------------
+  // Playback and draft persistence
+  // ---------------------------------------------------------------------------
+
   function toggleAudioPlayback() {
     if (!state.audioBlob) return;
 
@@ -604,6 +646,11 @@
   async function saveAndGoNext() {
     if (!state.audioBlob) {
       setStatus('録音データがありません。録音してから次へ進んでください。', 'error');
+      return;
+    }
+
+    if (state.elapsedMs < CONFIG.MIN_RECORDING_SECONDS * 1000) {
+      setStatus('録音時間が30秒未満です。30秒以上録音してから次へ進んでください。', 'warning');
       return;
     }
 
@@ -664,6 +711,10 @@
     renderTimer(state.elapsedMs);
     renderState();
   }
+
+  // ---------------------------------------------------------------------------
+  // Waveform and timer rendering
+  // ---------------------------------------------------------------------------
 
   async function setupWaveform(stream) {
     try {
@@ -782,7 +833,7 @@
       renderTimer(ms);
 
       if (ms >= CONFIG.MAX_RECORDING_SECONDS * 1000) {
-        stopRecording();
+        stopRecording(true);
       }
     }, 250);
   }
@@ -812,6 +863,7 @@
   function renderState() {
     const isRecording = state.status === 'recording';
     const isPaused = state.status === 'paused';
+    const isStopping = state.status === 'stopping';
     const isRecorded = state.status === 'recorded';
 
     els.recordButton.classList.toggle('recording', isRecording);
@@ -839,14 +891,25 @@
       return;
     }
 
+    if (isStopping) {
+      els.recordButton.disabled = true;
+      els.recordLabel.textContent = '保存中';
+      els.pauseButton.disabled = true;
+      els.pauseButton.textContent = '一時停止';
+      els.resetButton.disabled = true;
+      els.nextButton.disabled = true;
+      return;
+    }
+
     if (isRecorded) {
+      const hasMinimumDuration = state.elapsedMs >= CONFIG.MIN_RECORDING_SECONDS * 1000;
       els.recordButton.disabled = false;
       els.recordLabel.textContent = '録り直す';
       els.pauseButton.disabled = true;
       els.pauseButton.textContent = '一時停止';
       els.resetButton.disabled = false;
-      els.nextButton.disabled = false;
-      setRecordStatus('録音済み', 'ready');
+      els.nextButton.disabled = !hasMinimumDuration;
+      setRecordStatus(hasMinimumDuration ? '録音済み' : '30秒未満', hasMinimumDuration ? 'ready' : 'error');
       return;
     }
 
@@ -857,6 +920,7 @@
     els.resetButton.disabled = true;
     els.nextButton.disabled = true;
   }
+
 
   function setRecordStatus(text, type) {
     els.recordStatusBadge.textContent = text;
@@ -891,6 +955,10 @@
 
     state.mediaStream = null;
   }
+
+  // ---------------------------------------------------------------------------
+  // Platform diagnostics and error messages
+  // ---------------------------------------------------------------------------
 
   function buildRecordingErrorMessage(error) {
     const name = error && error.name ? String(error.name) : '';
@@ -1015,6 +1083,10 @@
     error.name = name;
     return error;
   }
+
+  // ---------------------------------------------------------------------------
+  // IndexedDB and generic utilities
+  // ---------------------------------------------------------------------------
 
   function openDb() {
     return new Promise((resolve, reject) => {
