@@ -49,6 +49,7 @@
     audioMeta: null,
     imageBlob: null,
     imageMeta: null,
+    attachments: [],
 
     audioObjectUrl: '',
     imageObjectUrl: '',
@@ -70,6 +71,10 @@
 
   document.addEventListener('DOMContentLoaded', initializePage);
 
+  // ---------------------------------------------------------------------------
+  // Page initialization
+  // ---------------------------------------------------------------------------
+
   async function initializePage() {
     collectElements();
     bindEvents();
@@ -87,6 +92,7 @@
       validateDraftData();
       renderInputSummary();
       renderImageSummary();
+      renderAttachmentSummary();
     } catch (error) {
       setFatalState('投稿データの読込に失敗しました。\n' + getErrorMessage(error));
       return;
@@ -148,6 +154,11 @@
     elements.imagePreview = document.getElementById('imagePreview');
     elements.imageMemoText = document.getElementById('imageMemoText');
 
+    elements.attachmentSummaryCard = document.getElementById('attachmentSummaryCard');
+    elements.attachmentStatus = document.getElementById('attachmentStatus');
+    elements.attachmentSummary = document.getElementById('attachmentSummary');
+    elements.attachmentList = document.getElementById('attachmentList');
+
     elements.uploadButton = document.getElementById('uploadButton');
     elements.resultCard = document.getElementById('resultCard');
     elements.folderLink = document.getElementById('folderLink');
@@ -206,6 +217,10 @@
       || '';
   }
 
+  // ---------------------------------------------------------------------------
+  // Draft loading and validation
+  // ---------------------------------------------------------------------------
+
   async function loadDraftData() {
     state.db = await openDatabase();
 
@@ -217,6 +232,8 @@
     state.audioMeta = await getDraft('audioMeta');
     state.imageBlob = await getDraft('imageBlob');
     state.imageMeta = await getDraft('imageMeta');
+    const storedAttachments = await getDraft('attachments');
+    state.attachments = Array.isArray(storedAttachments) ? storedAttachments : [];
 
     if (!state.inputMode) {
       state.inputMode = state.textBody ? 'text' : 'audio';
@@ -235,7 +252,21 @@
     if (!['text', 'audio'].includes(state.inputMode)) {
       throw new Error('入力方式を判定できません。入力方法選択画面からやり直してください。');
     }
+
+    if (state.inputMode !== 'text') {
+      state.attachments = [];
+    }
+
+    const checked = FieldReportAttachments.validateCollection(
+      state.attachments,
+      state.imageBlob ? state.imageBlob.size : 0
+    );
+    state.attachments = checked.items;
   }
+
+  // ---------------------------------------------------------------------------
+  // Preview rendering
+  // ---------------------------------------------------------------------------
 
   function renderInputSummary() {
     if (state.inputMode === 'text') {
@@ -322,6 +353,29 @@
     elements.imageMemoText.textContent = meta.memo || meta.note || 'なし';
   }
 
+  function renderAttachmentSummary() {
+    if (state.inputMode !== 'text' || !state.attachments.length) {
+      elements.attachmentSummaryCard.classList.add('hidden');
+      elements.attachmentList.innerHTML = '';
+      return;
+    }
+
+    elements.attachmentSummaryCard.classList.remove('hidden');
+    elements.attachmentStatus.textContent = state.attachments.length + '件';
+    const total = state.attachments.reduce((sum, item) => sum + Number(item.size || (item.blob && item.blob.size) || 0), 0);
+    elements.attachmentSummary.textContent = '関連ファイル：' + state.attachments.length + '件 / ' + formatBytes(total);
+    elements.attachmentList.innerHTML = state.attachments.map(item => {
+      const name = item.fileName || item.name || '添付ファイル';
+      const category = { document: '文書・コード', image: '画像', audio: '音声', video: '動画' }[item.category] || 'ファイル';
+      return '<div class="attachment-summary-item"><strong>' + escapeHtml(name) + '</strong><span>'
+        + escapeHtml(category) + '・' + escapeHtml(formatBytes(item.size || (item.blob && item.blob.size) || 0)) + '</span></div>';
+    }).join('');
+  }
+
+  // ---------------------------------------------------------------------------
+  // User and department context
+  // ---------------------------------------------------------------------------
+
   async function loadApplicationContext() {
     const raw = sessionStorage.getItem(CONFIG.APP_CONTEXT_STORAGE_KEY);
 
@@ -373,6 +427,10 @@
 
     updateUploadButtonState();
   }
+
+  // ---------------------------------------------------------------------------
+  // Google Drive authorization
+  // ---------------------------------------------------------------------------
 
   async function waitForGoogleIdentityServices() {
     for (let i = 0; i < 80; i += 1) {
@@ -673,6 +731,10 @@
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Upload workflow
+  // ---------------------------------------------------------------------------
+
   function handleUploadClick() {
     if (state.isUploading || !validateBeforeUpload()) return;
 
@@ -808,6 +870,15 @@
       showStatus('対象部署を選択してください。', 'error');
       return false;
     }
+    try {
+      FieldReportAttachments.validateCollection(
+        state.inputMode === 'text' ? state.attachments : [],
+        state.imageBlob ? state.imageBlob.size : 0
+      );
+    } catch (error) {
+      showStatus(getErrorMessage(error), 'error');
+      return false;
+    }
     return true;
   }
 
@@ -841,6 +912,10 @@
     markDriveReady();
   }
 
+  // ---------------------------------------------------------------------------
+  // Report files and metadata
+  // ---------------------------------------------------------------------------
+
   async function uploadReportCore() {
     const targetDepartment = elements.targetDepartmentSelect.value;
     const reportId = buildReportId();
@@ -850,6 +925,7 @@
     const folder = await createDriveFolder(folderName, CONFIG.DRIVE_ROOT_FOLDER_ID);
     const audioFile = await uploadAudioFileIfNeeded(reportId, folder.id);
     const imageFile = await uploadImageFileIfNeeded(reportId, folder.id);
+    const attachmentFiles = await uploadAttachmentFilesIfNeeded(reportId, folder.id);
 
     let metadata = buildReportMetadata({
       reportId,
@@ -858,6 +934,7 @@
       folder,
       audioFile,
       imageFile,
+      attachmentFiles,
       metadataFile: null
     });
 
@@ -870,6 +947,7 @@
       folder,
       audioFile,
       imageFile,
+      attachmentFiles,
       metadataFile
     });
 
@@ -903,12 +981,33 @@
     });
   }
 
+  async function uploadAttachmentFilesIfNeeded(reportId, folderId) {
+    if (state.inputMode !== 'text' || !state.attachments.length) return [];
+
+    const results = [];
+    for (let index = 0; index < state.attachments.length; index += 1) {
+      const item = FieldReportAttachments.normalizeStoredAttachment(state.attachments[index]);
+      if (!item.blob) throw new Error('添付ファイル本体を読み込めません: ' + item.fileName);
+      const uploaded = await uploadFileResumable({
+        name: 'attachment_' + String(index + 1).padStart(2, '0') + '_' + sanitizeFileName(item.fileName),
+        mimeType: item.mimeType || item.blob.type || 'application/octet-stream',
+        blob: item.blob,
+        parentFolderId: folderId
+      });
+      results.push({ item, uploaded });
+    }
+    return results;
+  }
+
   function buildReportMetadata(params) {
     const submitter = state.submitter || {};
     const audioMeta = state.audioMeta || {};
     const imageMeta = state.imageMeta || {};
     const textMeta = state.textMeta || {};
     const folderUrl = params.folder.webViewLink || buildDriveFolderUrl(params.folder.id);
+    const attachments = (params.attachmentFiles || []).map(entry =>
+      FieldReportAttachments.toMetadata(entry.item, entry.uploaded)
+    );
 
     const audio = params.audioFile ? {
       id: params.audioFile.id,
@@ -936,7 +1035,7 @@
       : '';
 
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       reportId: params.reportId,
       createdAt: state.draftStartedAt || new Date().toISOString(),
       clientCreatedAt: new Date().toISOString(),
@@ -971,6 +1070,7 @@
       },
       audio,
       image,
+      attachments,
 
       drive: {
         folderId: params.folder.id,
@@ -984,6 +1084,16 @@
         imageFileName: image ? image.name : '',
         imageMimeType: image ? image.mimeType : '',
         imageFileUrl: image ? image.url : '',
+        attachmentFiles: attachments.map(function(item) {
+          return {
+            fileId: item.fileId,
+            fileName: item.fileName,
+            mimeType: item.mimeType,
+            size: item.size,
+            category: item.category,
+            url: item.url
+          };
+        }),
         metadataFileId: params.metadataFile ? params.metadataFile.id : '',
         metadataFileName: params.metadataFile ? params.metadataFile.name : 'metadata.json',
         metadataFileUrl
@@ -996,6 +1106,10 @@
       }
     };
   }
+
+  // ---------------------------------------------------------------------------
+  // Google Drive API helpers
+  // ---------------------------------------------------------------------------
 
   async function createDriveFolder(name, parentFolderId) {
     const response = await fetch(
@@ -1109,6 +1223,10 @@
     ));
   }
 
+  // ---------------------------------------------------------------------------
+  // GAS upload-completed notification
+  // ---------------------------------------------------------------------------
+
   async function notifyGasUploadCompleted(metadata) {
     const drive = metadata.drive || {};
 
@@ -1126,6 +1244,7 @@
       imageFileUrl: drive.imageFileUrl || '',
       metadataFileId: drive.metadataFileId || '',
       metadataFileUrl: drive.metadataFileUrl || '',
+      attachments: Array.isArray(metadata.attachments) ? metadata.attachments : [],
       metadata
     };
 
@@ -1161,6 +1280,10 @@
       if (timer) clearTimeout(timer);
     });
   }
+
+  // ---------------------------------------------------------------------------
+  // Completion, cleanup, and navigation
+  // ---------------------------------------------------------------------------
 
   function renderUploadResult(result) {
     elements.resultCard.classList.remove('hidden');
@@ -1308,6 +1431,10 @@
     elements.statusBox.textContent = message;
   }
 
+  // ---------------------------------------------------------------------------
+  // IndexedDB and generic utilities
+  // ---------------------------------------------------------------------------
+
   function openDatabase() {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
@@ -1393,6 +1520,12 @@
     if (value < 1024) return value + ' B';
     if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB';
     return (value / 1024 / 1024).toFixed(1) + ' MB';
+  }
+
+  function escapeHtml(value) {
+    return String(value || '').replace(/[&<>'"]/g, character => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[character]));
   }
 
   function getErrorMessage(error) {
