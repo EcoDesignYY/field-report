@@ -20,6 +20,10 @@
 
   document.addEventListener('DOMContentLoaded', initializePage);
 
+  // ---------------------------------------------------------------------------
+  // Page initialization
+  // ---------------------------------------------------------------------------
+
   async function initializePage() {
     collectElements();
     bindEvents();
@@ -94,6 +98,10 @@
     elements.audioModeButton.addEventListener('click', () => startInputMode('audio'));
   }
 
+  // ---------------------------------------------------------------------------
+  // Input-mode selection and draft reset
+  // ---------------------------------------------------------------------------
+
   async function startInputMode(mode) {
     if (state.isStarting) return;
 
@@ -124,11 +132,16 @@
       'audioMeta',
       'imageBlob',
       'imageMeta',
+      'attachments',
       'uploadResult'
     ];
 
     await Promise.all(keys.map(deleteDraft));
   }
+
+  // ---------------------------------------------------------------------------
+  // Bootstrap context and authentication token
+  // ---------------------------------------------------------------------------
 
   function consumeBootstrapContext() {
     const url = new URL(location.href);
@@ -281,6 +294,10 @@
       || sessionStorage.getItem('fieldReportToken')
       || '';
   }
+
+  // ---------------------------------------------------------------------------
+  // IndexedDB and generic utilities
+  // ---------------------------------------------------------------------------
 
   function openDatabase() {
     return new Promise((resolve, reject) => {
