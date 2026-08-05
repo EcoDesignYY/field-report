@@ -2,23 +2,48 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  >
   <title>テキスト入力</title>
-  <link rel="stylesheet" href="./text.css?v=readable-old-ui-v4">
+  <link
+    rel="stylesheet"
+    href="./text.css?v=workflow-v151-readable"
+  >
 </head>
 <body>
   <div class="app-shell">
     <header class="top-bar">
-      <button id="backButton" type="button" class="top-button">戻る</button>
+      <button
+        id="backButton"
+        type="button"
+        class="top-button"
+      >
+        戻る
+      </button>
       <div class="top-title">テキスト入力</div>
-      <button id="helpButton" type="button" class="top-button">ヘルプ</button>
+      <button
+        id="helpButton"
+        type="button"
+        class="top-button"
+      >
+        ヘルプ
+      </button>
     </header>
 
     <main class="content">
       <section class="hero-card">
-        <div id="inputStatusBadge" class="status-badge status-ready">入力できます</div>
+        <div
+          id="inputStatusBadge"
+          class="status-badge status-ready"
+        >
+          入力できます
+        </div>
         <h1>現場の状況を文章で記録</h1>
-        <p>発生場所、対象物、症状、発生時期、困っていることを分かる範囲で入力してください。</p>
+        <p>
+          発生場所、対象物、症状、発生時期、困っていることを分かる範囲で入力してください。
+        </p>
       </section>
 
       <section class="text-card">
@@ -29,18 +54,59 @@
           maxlength="4000"
           placeholder="例：第二ラインの搬送ベルト右側から異音がします。今朝の始業時から発生し、運転速度を上げると音が大きくなります。"
         ></textarea>
+
         <div class="text-footer">
           <span>10文字以上入力してください。</span>
           <span id="characterCount">0 / 4000</span>
         </div>
       </section>
 
+      <section class="attachment-card">
+        <div class="section-head">
+          <div>
+            <h2>関連ファイル</h2>
+            <p>
+              最大5件、1ファイル12MiB、撮影画像を含む合計12MiBです。
+            </p>
+          </div>
+
+          <button
+            id="selectAttachmentsButton"
+            type="button"
+            class="secondary-button"
+          >
+            ファイルを選択
+          </button>
+        </div>
+
+        <input
+          id="attachmentFileInput"
+          type="file"
+          multiple
+          class="hidden"
+        >
+
+        <div class="usage-row">
+          <strong id="attachmentCount">0 / 5件</strong>
+          <span id="attachmentUsage">0 B / 12 MiB</span>
+        </div>
+
+        <div id="attachmentList" class="attachment-list"></div>
+        <p id="attachmentEmpty" class="empty-message">
+          添付ファイルはありません。
+        </p>
+      </section>
+
       <section class="tips-card">
         <h2>入力の目安</h2>
         <ul>
           <li>確認できた事実と推測を分けて入力してください。</li>
-          <li>いつ、どこで、何が、どのようになったかを含めてください。</li>
-          <li>次の画面で写真を撮影または添付できます。</li>
+          <li>
+            PDF、テキスト、コード、画像、音声、動画を添付できます。
+          </li>
+          <li>
+            次の画面では、AI画像解析用の現場写真を別途撮影できます。
+          </li>
         </ul>
       </section>
 
@@ -48,10 +114,18 @@
     </main>
 
     <footer class="bottom-actions">
-      <button id="nextButton" type="button" class="primary-button" disabled>保存して次へ</button>
+      <button
+        id="nextButton"
+        type="button"
+        class="primary-button"
+        disabled
+      >
+        保存して次へ
+      </button>
     </footer>
   </div>
 
-  <script src="./text.js?v=readable-old-ui-v4"></script>
+  <script src="./attachment-rules.js?v=workflow-v151-readable"></script>
+  <script src="./text.js?v=workflow-v151-readable"></script>
 </body>
 </html>
