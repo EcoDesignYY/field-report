@@ -363,3 +363,129 @@ textarea {
     height: 108px;
   }
 }
+
+/* v1.6.3 responsive layer: smartphone / tablet / desktop */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+@supports (min-height: 100dvh) {
+  .app-shell {
+    min-height: 100dvh;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 1024px) {
+  .content {
+    width: min(100%, 880px);
+    max-width: 880px;
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+
+  .top-button,
+  .primary-button,
+  .secondary-button,
+  .choice-card {
+    min-height: 48px;
+  }
+}
+
+@media (max-width: 600px) {
+  .top-bar {
+    height: auto;
+    min-height: calc(58px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+    grid-template-columns: 68px minmax(0, 1fr) 68px;
+  }
+
+  .top-button {
+    min-height: 44px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .content {
+    padding-left: calc(12px + env(safe-area-inset-left));
+    padding-right: calc(12px + env(safe-area-inset-right));
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .primary-button,
+  .secondary-button,
+  .choice-card {
+    min-height: 48px;
+  }
+
+  .bottom-actions {
+    padding-right: calc(12px + env(safe-area-inset-right));
+    padding-left: calc(12px + env(safe-area-inset-left));
+  }
+
+  .bottom-actions .primary-button,
+  .primary-button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 380px) {
+  .top-bar {
+    grid-template-columns: 62px minmax(0, 1fr) 62px;
+  }
+
+  .top-title {
+    font-size: 14px;
+  }
+
+  .top-button {
+    font-size: 13px;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .choice-card:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 1024px) {
+  .content {
+    max-width: 760px;
+  }
+}
+
+@media (max-width: 600px) {
+  .hero-card,
+  .recorder-card,
+  .memo-card,
+  .tips-card {
+    padding: 15px;
+    border-radius: 17px;
+  }
+
+  .recorder-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .audio-preview-row {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+}
