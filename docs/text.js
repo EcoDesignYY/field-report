@@ -427,7 +427,7 @@
     els.backButton.addEventListener('click', () => { location.href = CONFIG.PREVIOUS_PAGE_URL; });
     els.helpButton.addEventListener('click', () => {
       showStatus(
-        '本文は10文字以上入力してください。添付は最大5件、撮影画像を含む合計12MiBまでです。',
+        '本文10文字以上、または関連ファイル1件以上で次へ進めます。添付は最大5件、撮影画像を含む合計12MiBまでです。',
         'info'
       );
     });
@@ -471,11 +471,13 @@
   function renderTextState() {
     const length = els.textBodyInput.value.length;
     els.characterCount.textContent = length + ' / ' + CONFIG.MAX_TEXT_LENGTH;
-    els.nextButton.disabled = length < CONFIG.MIN_TEXT_LENGTH;
-    els.inputStatusBadge.textContent = length >= CONFIG.MIN_TEXT_LENGTH
-      ? '入力内容を保存できます'
-      : '10文字以上入力';
-    const statusClass = length >= CONFIG.MIN_TEXT_LENGTH
+    const hasAttachments = state.attachments.length > 0;
+    const canContinue = length >= CONFIG.MIN_TEXT_LENGTH || hasAttachments;
+    els.nextButton.disabled = !canContinue;
+    els.inputStatusBadge.textContent = canContinue
+      ? (length >= CONFIG.MIN_TEXT_LENGTH ? '入力内容を保存できます' : 'ファイルのみで投稿できます')
+      : '本文10文字以上 または ファイル添付';
+    const statusClass = canContinue
       ? 'status-ready'
       : 'status-error';
     els.inputStatusBadge.className = 'status-badge ' + statusClass;
@@ -506,6 +508,8 @@
     els.attachmentList.querySelectorAll('[data-remove-id]').forEach(button => {
       button.addEventListener('click', () => removeAttachment(button.dataset.removeId));
     });
+
+    renderTextState();
   }
 
   // ---------------------------------------------------------------------------
@@ -514,8 +518,8 @@
 
   async function saveAndGoNext() {
     const body = els.textBodyInput.value.trim();
-    if (body.length < CONFIG.MIN_TEXT_LENGTH) {
-      showStatus('問題内容を10文字以上入力してください。', 'error');
+    if (body.length < CONFIG.MIN_TEXT_LENGTH && !state.attachments.length) {
+      showStatus('問題内容を10文字以上入力するか、関連ファイルを1件以上添付してください。', 'error');
       return;
     }
 
@@ -524,7 +528,8 @@
         state.attachments,
         state.imageBlob ? state.imageBlob.size : 0
       );
-      await putDraft('inputMode', 'text');
+      const inputMode = body ? 'text' : 'file';
+      await putDraft('inputMode', inputMode);
       await putDraft('textBody', body);
       await putDraft('textMeta', {
         length: body.length,
