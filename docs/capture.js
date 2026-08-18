@@ -398,7 +398,7 @@
       const storedAttachments = await getDraft('attachments');
       state.attachments = Array.isArray(storedAttachments) ? storedAttachments : [];
 
-      if (!['text', 'audio'].includes(state.inputMode)) {
+      if (!['text', 'file', 'audio'].includes(state.inputMode)) {
         throw new Error('入力方式がありません。入力方法選択からやり直してください。');
       }
 
@@ -530,7 +530,7 @@
 
   async function setImage(blob, fileName, mimeType, width, height) {
     if (!blob || blob.size <= 0) throw new Error('0バイトの画像は保存できません。');
-    const attachmentBytes = state.inputMode === 'text'
+    const attachmentBytes = ['text', 'file'].includes(state.inputMode)
       ? state.attachments.reduce((sum, item) => {
           return sum + Number(
             item.size || (item.blob && item.blob.size) || 0
@@ -592,7 +592,7 @@
 
   function renderUsage() {
     const imageBytes = state.imageBlob ? state.imageBlob.size : 0;
-    const attachmentBytes = state.inputMode === 'text'
+    const attachmentBytes = ['text', 'file'].includes(state.inputMode)
       ? state.attachments.reduce((sum, item) => {
           return sum + Number(
             item.size || (item.blob && item.blob.size) || 0
@@ -602,7 +602,7 @@
     els.imageSizeText.textContent = state.imageBlob
       ? '画像 ' + FieldReportAttachments.formatBytes(imageBytes)
       : '画像なし';
-    els.totalUsageText.textContent = state.inputMode === 'text'
+    els.totalUsageText.textContent = ['text', 'file'].includes(state.inputMode)
       ? '投稿ファイル合計 ' +
         FieldReportAttachments.formatBytes(imageBytes + attachmentBytes) +
         ' / 12 MiB'
@@ -623,7 +623,7 @@
         });
         await putDraft('imageMeta', state.imageMeta);
       }
-      if (state.inputMode === 'text') {
+      if (['text', 'file'].includes(state.inputMode)) {
         FieldReportAttachments.validateCollection(
           state.attachments,
           state.imageBlob ? state.imageBlob.size : 0
