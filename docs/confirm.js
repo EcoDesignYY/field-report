@@ -594,7 +594,11 @@
     state.attachments = Array.isArray(storedAttachments) ? storedAttachments : [];
 
     if (!state.inputMode) {
-      state.inputMode = state.textBody ? 'text' : 'audio';
+      state.inputMode = state.textBody
+        ? 'text'
+        : state.attachments.length
+          ? 'file'
+          : 'audio';
     }
   }
 
@@ -607,12 +611,16 @@
       throw new Error('録音モードですが、録音データがありません。');
     }
 
-    if (!['text', 'audio'].includes(state.inputMode)) {
+    if (!['text', 'file', 'audio'].includes(state.inputMode)) {
       throw new Error('入力方式を判定できません。入力方法選択画面からやり直してください。');
     }
 
-    if (state.inputMode !== 'text') {
+    if (!['text', 'file'].includes(state.inputMode)) {
       state.attachments = [];
+    }
+
+    if (state.inputMode === 'file' && !state.attachments.length) {
+      throw new Error('ファイル投稿ですが、関連ファイルがありません。');
     }
 
     const checked = FieldReportAttachments.validateCollection(
@@ -627,7 +635,7 @@
   // ---------------------------------------------------------------------------
 
   function renderInputSummary() {
-    if (state.inputMode === 'text') {
+    if (state.inputMode === 'text' || state.inputMode === 'file') {
       renderTextSummary();
       return;
     }
@@ -637,10 +645,10 @@
   function renderTextSummary() {
     elements.textSummaryCard.classList.remove('hidden');
     elements.audioSummaryCard.classList.add('hidden');
-    elements.textStatus.textContent = '入力済み';
+    elements.textStatus.textContent = state.inputMode === 'file' ? 'ファイルのみ' : '入力済み';
     elements.textStatus.style.background = '#dcfce7';
     elements.textStatus.style.color = '#166534';
-    elements.textBodyPreview.textContent = state.textBody;
+    elements.textBodyPreview.textContent = state.textBody || '本文なし（関連ファイルのみで投稿）';
   }
 
   function renderAudioSummary() {
@@ -712,7 +720,7 @@
   }
 
   function renderAttachmentSummary() {
-    if (state.inputMode !== 'text' || !state.attachments.length) {
+    if (!['text', 'file'].includes(state.inputMode) || !state.attachments.length) {
       elements.attachmentSummaryCard.classList.add('hidden');
       elements.attachmentList.innerHTML = '';
       return;
@@ -1267,6 +1275,10 @@
       showStatus('テキスト入力内容がありません。', 'error');
       return false;
     }
+    if (state.inputMode === 'file' && !state.attachments.length) {
+      showStatus('関連ファイルがありません。', 'error');
+      return false;
+    }
     if (state.inputMode === 'audio' && !state.audioBlob) {
       showStatus('録音データがありません。', 'error');
       return false;
@@ -1281,7 +1293,7 @@
     }
     try {
       FieldReportAttachments.validateCollection(
-        state.inputMode === 'text' ? state.attachments : [],
+        ['text', 'file'].includes(state.inputMode) ? state.attachments : [],
         state.imageBlob ? state.imageBlob.size : 0
       );
     } catch (error) {
@@ -1391,7 +1403,7 @@
   }
 
   async function uploadAttachmentFilesIfNeeded(reportId, folderId) {
-    if (state.inputMode !== 'text' || !state.attachments.length) return [];
+    if (!['text', 'file'].includes(state.inputMode) || !state.attachments.length) return [];
 
     const results = [];
     for (let index = 0; index < state.attachments.length; index += 1) {
@@ -1444,7 +1456,7 @@
       : '';
 
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       reportId: params.reportId,
       createdAt: state.draftStartedAt || new Date().toISOString(),
       clientCreatedAt: new Date().toISOString(),
@@ -1454,10 +1466,10 @@
       inputMode: state.inputMode,
       input: {
         mode: state.inputMode,
-        text: state.inputMode === 'text' ? state.textBody : '',
+        text: state.textBody || '',
         speechRequired: state.inputMode === 'audio'
       },
-      text: state.inputMode === 'text' ? {
+      text: state.textBody ? {
         body: state.textBody,
         createdAt: textMeta.createdAt || state.draftStartedAt || '',
         characterCount: state.textBody.length
@@ -1809,7 +1821,11 @@
   }
 
   function updateUploadButtonState() {
-    const hasSource = state.inputMode === 'text' ? Boolean(state.textBody) : Boolean(state.audioBlob);
+    const hasSource = state.inputMode === 'audio'
+      ? Boolean(state.audioBlob)
+      : state.inputMode === 'file'
+        ? state.attachments.length > 0
+        : Boolean(state.textBody);
     const hasImage = Boolean(state.imageBlob);
     const hasDepartment = Boolean(elements.targetDepartmentSelect.value);
 
@@ -1889,7 +1905,7 @@
 
   function normalizeInputMode(mode) {
     const value = String(mode || '').toLowerCase();
-    return value === 'text' || value === 'audio' ? value : '';
+    return value === 'text' || value === 'file' || value === 'audio' ? value : '';
   }
 
   function buildReportId() {
