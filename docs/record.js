@@ -1,6 +1,362 @@
 (() => {
   'use strict';
 
+  // ---------------------------------------------------------------------------
+  // Attachment rules
+  //
+  // This page keeps its own local copy of the attachment validator. The three
+  // pages that use attachments are intentionally self-contained so deployment
+  // does not depend on a separate script loading before the page script.
+  // ---------------------------------------------------------------------------
+
+  const FieldReportAttachments = createFieldReportAttachments();
+
+  function createFieldReportAttachments() {
+    const MAX_FILES = 5;
+    const MAX_FILE_BYTES = 12 * 1024 * 1024;
+    const MAX_TOTAL_BYTES = 12 * 1024 * 1024;
+
+    const DEFINITIONS = {
+      pdf:  { category: 'document', mimes: ['application/pdf'] },
+      txt:  { category: 'document', mimes: ['text/plain'] },
+      html: { category: 'document', mimes: ['text/html'] },
+      htm:  { category: 'document', mimes: ['text/html'] },
+      css:  { category: 'document', mimes: ['text/css'] },
+      js: {
+        category: 'document',
+        mimes: [
+          'text/javascript',
+          'application/javascript',
+          'application/x-javascript'
+        ]
+      },
+      ts: {
+        category: 'document',
+        mimes: [
+          'text/x-typescript',
+          'application/x-typescript',
+          'text/plain'
+        ]
+      },
+      csv: {
+        category: 'document',
+        mimes: [
+          'text/csv',
+          'application/csv',
+          'text/plain'
+        ]
+      },
+      md: {
+        category: 'document',
+        mimes: ['text/markdown', 'text/plain']
+      },
+      py: {
+        category: 'document',
+        mimes: [
+          'text/x-python',
+          'application/x-python-code',
+          'text/plain'
+        ]
+      },
+      json: {
+        category: 'document',
+        mimes: [
+          'application/json',
+          'text/json',
+          'text/plain'
+        ]
+      },
+      xml: {
+        category: 'document',
+        mimes: [
+          'application/xml',
+          'text/xml',
+          'text/plain'
+        ]
+      },
+      rtf: {
+        category: 'document',
+        mimes: ['application/rtf', 'text/rtf']
+      },
+
+      jpeg: { category: 'image', mimes: ['image/jpeg'] },
+      jpg:  { category: 'image', mimes: ['image/jpeg'] },
+      png:  { category: 'image', mimes: ['image/png'] },
+      webp: { category: 'image', mimes: ['image/webp'] },
+      heic: {
+        category: 'image',
+        mimes: ['image/heic', 'image/heic-sequence']
+      },
+      heif: {
+        category: 'image',
+        mimes: ['image/heif', 'image/heif-sequence']
+      },
+
+      wav: {
+        category: 'audio',
+        mimes: ['audio/wav', 'audio/x-wav']
+      },
+      mp3: {
+        category: 'audio',
+        mimes: ['audio/mpeg', 'audio/mp3']
+      },
+      aiff: {
+        category: 'audio',
+        mimes: ['audio/aiff', 'audio/x-aiff']
+      },
+      aif: {
+        category: 'audio',
+        mimes: ['audio/aiff', 'audio/x-aiff']
+      },
+      aac: {
+        category: 'audio',
+        mimes: ['audio/aac', 'audio/x-aac']
+      },
+      ogg: {
+        category: 'audio',
+        mimes: ['audio/ogg', 'application/ogg']
+      },
+      flac: {
+        category: 'audio',
+        mimes: ['audio/flac', 'audio/x-flac']
+      },
+
+      mp4:  { category: 'video', mimes: ['video/mp4'] },
+      mpeg: { category: 'video', mimes: ['video/mpeg'] },
+      mpg:  { category: 'video', mimes: ['video/mpeg'] },
+      mov:  { category: 'video', mimes: ['video/quicktime'] },
+      avi: {
+        category: 'video',
+        mimes: ['video/x-msvideo', 'video/avi']
+      },
+      flv:  { category: 'video', mimes: ['video/x-flv'] },
+      webm: { category: 'video', mimes: ['video/webm'] },
+      wmv:  { category: 'video', mimes: ['video/x-ms-wmv'] },
+      '3gp':  { category: 'video', mimes: ['video/3gpp'] },
+      '3gpp': { category: 'video', mimes: ['video/3gpp'] }
+    };
+
+    const ACCEPT = Object.keys(DEFINITIONS)
+      .map(extension => '.' + extension)
+      .join(',');
+
+    function extensionOf(fileName) {
+      const value = String(fileName || '').trim();
+      const index = value.lastIndexOf('.');
+
+      return index >= 0
+        ? value.slice(index + 1).toLowerCase()
+        : '';
+    }
+
+    function sanitizeFileName(fileName) {
+      const value = String(fileName || '').trim();
+
+      if (!value) {
+        throw new Error('ファイル名がありません。');
+      }
+
+      if (/[\\/:*?"<>|\u0000-\u001f]/.test(value)) {
+        throw new Error(
+          'ファイル名に使用できない文字が含まれています: ' + value
+        );
+      }
+
+      return value.slice(0, 180);
+    }
+
+    function validateFile(file) {
+      if (!file) {
+        throw new Error('ファイルを読み込めませんでした。');
+      }
+
+      const fileName = sanitizeFileName(
+        file.name || file.fileName || ''
+      );
+      const extension = extensionOf(fileName);
+      const definition = DEFINITIONS[extension];
+      const size = Number(file.size || 0);
+      const mimeType = String(file.type || file.mimeType || '')
+        .toLowerCase()
+        .trim();
+
+      if (!definition) {
+        throw new Error(
+          '対応していないファイル形式です: ' + fileName
+        );
+      }
+
+      if (size <= 0) {
+        throw new Error(
+          '0バイトのファイルは添付できません: ' + fileName
+        );
+      }
+
+      if (size > MAX_FILE_BYTES) {
+        throw new Error(
+          '1ファイルの上限12MiBを超えています: ' + fileName
+        );
+      }
+
+      const canUseExtensionOnly =
+        !mimeType || mimeType === 'application/octet-stream';
+
+      if (
+        !canUseExtensionOnly &&
+        definition.mimes.indexOf(mimeType) === -1
+      ) {
+        throw new Error(
+          '拡張子とファイル形式が一致しません: ' +
+          fileName +
+          ' (' + mimeType + ')'
+        );
+      }
+
+      return {
+        fileName,
+        extension,
+        mimeType: mimeType || definition.mimes[0],
+        category: definition.category,
+        size
+      };
+    }
+
+    function createId() {
+      const cryptoApi = window.crypto || null;
+
+      if (
+        cryptoApi &&
+        typeof cryptoApi.randomUUID === 'function'
+      ) {
+        return cryptoApi.randomUUID();
+      }
+
+      return (
+        'ATT-' +
+        Date.now() +
+        '-' +
+        Math.random().toString(36).slice(2, 10)
+      );
+    }
+
+    function normalizeStoredAttachment(item) {
+      if (!item) {
+        return null;
+      }
+
+      const blob = item.blob || item.file || null;
+      const checked = validateFile({
+        name: item.fileName || item.name || (blob && blob.name) || '',
+        size: item.size || (blob && blob.size) || 0,
+        type: item.mimeType || (blob && blob.type) || ''
+      });
+
+      return {
+        id: String(item.id || createId()),
+        fileName: checked.fileName,
+        extension: checked.extension,
+        mimeType: checked.mimeType,
+        category: checked.category,
+        size: checked.size,
+        addedAt: item.addedAt || new Date().toISOString(),
+        blob
+      };
+    }
+
+    function fromFile(file) {
+      const checked = validateFile(file);
+
+      return {
+        id: createId(),
+        fileName: checked.fileName,
+        extension: checked.extension,
+        mimeType: checked.mimeType,
+        category: checked.category,
+        size: checked.size,
+        addedAt: new Date().toISOString(),
+        blob: file
+      };
+    }
+
+    function validateCollection(items, extraBytes = 0) {
+      const normalized = (Array.isArray(items) ? items : [])
+        .map(normalizeStoredAttachment)
+        .filter(Boolean);
+
+      if (normalized.length > MAX_FILES) {
+        throw new Error('添付できるファイルは最大5件です。');
+      }
+
+      const attachmentBytes = normalized.reduce(
+        (sum, item) => sum + item.size,
+        0
+      );
+      const totalBytes = attachmentBytes + Number(extraBytes || 0);
+
+      if (totalBytes > MAX_TOTAL_BYTES) {
+        throw new Error(
+          '添付ファイルと撮影画像の合計が12MiBを超えています。'
+        );
+      }
+
+      return {
+        items: normalized,
+        totalBytes
+      };
+    }
+
+    function toMetadata(item, uploadedFile) {
+      const url = uploadedFile &&
+        (uploadedFile.webViewLink || uploadedFile.url)
+        ? (uploadedFile.webViewLink || uploadedFile.url)
+        : '';
+
+      return {
+        fileId: uploadedFile && uploadedFile.id
+          ? uploadedFile.id
+          : '',
+        fileName: item.fileName,
+        extension: item.extension,
+        mimeType: uploadedFile && uploadedFile.mimeType
+          ? uploadedFile.mimeType
+          : item.mimeType,
+        size: item.size,
+        category: item.category,
+        url
+      };
+    }
+
+    function formatBytes(bytes) {
+      const value = Number(bytes || 0);
+
+      if (value < 1024) {
+        return value + ' B';
+      }
+
+      if (value < 1024 * 1024) {
+        return (value / 1024).toFixed(1) + ' KiB';
+      }
+
+      return (value / 1024 / 1024).toFixed(1) + ' MiB';
+    }
+
+    return Object.freeze({
+      MAX_FILES,
+      MAX_FILE_BYTES,
+      MAX_TOTAL_BYTES,
+      DEFINITIONS,
+      ACCEPT,
+      extensionOf,
+      validateFile,
+      validateCollection,
+      normalizeStoredAttachment,
+      fromFile,
+      toMetadata,
+      formatBytes
+    });
+  }
+
+
   const CONFIG = {
     DB_NAME: 'field-report-draft-db',
     DB_VERSION: 1,
@@ -36,7 +392,9 @@
     status: 'idle',
     requestedMimeType: '',
     actualMimeType: '',
-    recordingSequence: 0
+    recordingSequence: 0,
+    attachments: [],
+    imageBlob: null
   };
 
   const els = {};
@@ -65,10 +423,18 @@
       await putDraft('inputMode', 'audio');
       await deleteDraft('textBody');
       await deleteDraft('textMeta');
-      await deleteDraft('attachments');
+
+      const storedAttachments = await getDraft('attachments');
+      state.imageBlob = await getDraft('imageBlob');
+      state.attachments = FieldReportAttachments.validateCollection(
+        Array.isArray(storedAttachments) ? storedAttachments : [],
+        state.imageBlob ? state.imageBlob.size : 0
+      ).items;
+      els.attachmentFileInput.accept = FieldReportAttachments.ACCEPT;
 
       clearWaveform();
       await loadExistingDraft();
+      renderAttachmentState();
 
       logRecordingEnvironment();
       setStatus('', '');
@@ -94,6 +460,12 @@
     els.audioPlayStatus = document.getElementById('audioPlayStatus');
     els.audioPlayer = document.getElementById('audioPlayer');
     els.audioMemoInput = document.getElementById('audioMemoInput');
+    els.selectAttachmentsButton = document.getElementById('selectAttachmentsButton');
+    els.attachmentFileInput = document.getElementById('attachmentFileInput');
+    els.attachmentCount = document.getElementById('attachmentCount');
+    els.attachmentUsage = document.getElementById('attachmentUsage');
+    els.attachmentList = document.getElementById('attachmentList');
+    els.attachmentEmpty = document.getElementById('attachmentEmpty');
     els.nextButton = document.getElementById('nextButton');
     els.statusBox = document.getElementById('statusBox');
 
@@ -112,6 +484,12 @@
       'audioPlayStatus',
       'audioPlayer',
       'audioMemoInput',
+      'selectAttachmentsButton',
+      'attachmentFileInput',
+      'attachmentCount',
+      'attachmentUsage',
+      'attachmentList',
+      'attachmentEmpty',
       'nextButton',
       'statusBox'
     ];
@@ -143,6 +521,8 @@
     els.pauseButton.addEventListener('click', togglePauseRecording);
     els.resetButton.addEventListener('click', () => resetRecording(true));
     els.playAudioButton.addEventListener('click', toggleAudioPlayback);
+    els.selectAttachmentsButton.addEventListener('click', () => els.attachmentFileInput.click());
+    els.attachmentFileInput.addEventListener('change', handleAttachmentSelection);
     els.nextButton.addEventListener('click', saveAndGoNext);
 
     els.audioPlayer.addEventListener('ended', () => {
@@ -618,6 +998,40 @@
     cleanupStream();
   }
 
+  async function handleAttachmentSelection(event) {
+    const selected = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!selected.length) return;
+    try {
+      const next = state.attachments.slice();
+      selected.forEach(file => next.push(FieldReportAttachments.fromFile(file)));
+      state.attachments = FieldReportAttachments.validateCollection(next, state.imageBlob ? state.imageBlob.size : 0).items;
+      await putDraft('attachments', state.attachments);
+      renderAttachmentState();
+      setStatus('関連ファイルを追加しました。', 'success');
+    } catch (error) { setStatus(getErrorMessage(error), 'error'); }
+  }
+
+  async function removeAttachment(id) {
+    state.attachments = state.attachments.filter(item => item.id !== id);
+    await putDraft('attachments', state.attachments);
+    renderAttachmentState();
+  }
+
+  function renderAttachmentState() {
+    const result = FieldReportAttachments.validateCollection(state.attachments, state.imageBlob ? state.imageBlob.size : 0);
+    els.attachmentCount.textContent = state.attachments.length + ' / ' + FieldReportAttachments.MAX_FILES + '件';
+    els.attachmentUsage.textContent = FieldReportAttachments.formatBytes(result.totalBytes) + ' / 12 MiB';
+    els.attachmentEmpty.classList.toggle('hidden', state.attachments.length > 0);
+    els.attachmentList.innerHTML = state.attachments.map(item => '<div class="attachment-item"><div><div class="attachment-name">' + escapeHtml(item.fileName) + '</div><div class="attachment-meta">' + escapeHtml(categoryLabel(item.category)) + '・' + escapeHtml(item.extension.toUpperCase()) + '・' + escapeHtml(FieldReportAttachments.formatBytes(item.size)) + '</div></div><button type="button" class="remove-attachment" data-remove-id="' + escapeHtml(item.id) + '">削除</button></div>').join('');
+    els.attachmentList.querySelectorAll('[data-remove-id]').forEach(button => button.addEventListener('click', () => removeAttachment(button.dataset.removeId)));
+  }
+
+  function categoryLabel(category) {
+    const labels = { document:'文書・コード', image:'画像', audio:'音声', video:'動画' };
+    return labels[category] || 'ファイル';
+  }
+
   // ---------------------------------------------------------------------------
   // Playback and draft persistence
   // ---------------------------------------------------------------------------
@@ -667,7 +1081,12 @@
         os: PLATFORM.os
       };
 
+      const checked = FieldReportAttachments.validateCollection(
+        state.attachments,
+        state.imageBlob ? state.imageBlob.size : 0
+      );
       await putDraft('inputMode', 'audio');
+      await putDraft('attachments', checked.items);
       await putDraft('audioBlob', state.audioBlob);
       await putDraft('audioMeta', meta);
 
