@@ -106,12 +106,26 @@
       </section>
 
       <section class="memo-card">
-        <label for="audioMemoInput">録音メモ</label>
+        <label for="audioMemoInput">補足事項</label>
         <textarea
           id="audioMemoInput"
           rows="4"
           placeholder="補足があれば入力してください。例：第二ライン右側、朝一から異音あり"
         ></textarea>
+      </section>
+
+      <section class="attachment-card">
+        <div class="section-head">
+          <div>
+            <h2>関連ファイル</h2>
+            <p>録音に加えてPDF、画像、音声、動画、テキスト等を最大5件添付できます。1ファイル12MiB、撮影画像を含む合計12MiBです。</p>
+          </div>
+          <button id="selectAttachmentsButton" type="button" class="secondary-button">ファイルを選択</button>
+        </div>
+        <input id="attachmentFileInput" type="file" multiple class="hidden">
+        <div class="usage-row"><strong id="attachmentCount">0 / 5件</strong><span id="attachmentUsage">0 B / 12 MiB</span></div>
+        <div id="attachmentList" class="attachment-list"></div>
+        <p id="attachmentEmpty" class="empty-message">添付ファイルはありません。</p>
       </section>
 
       <section class="tips-card">
@@ -144,6 +158,6 @@
     </footer>
   </div>
 
-  <script src="./record.js?v=workflow-v164-attachment-ai"></script>
+  <script src="./record.js?v=workflow-v170"></script>
 </body>
 </html>
