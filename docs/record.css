@@ -489,3 +489,19 @@ textarea {
     grid-template-columns: 80px minmax(0, 1fr);
   }
 }
+
+
+/* v1.7.0 related files */
+.attachment-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:18px; margin-bottom:16px; }
+.section-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }
+.section-head h2 { margin:0 0 6px; font-size:18px; }
+.section-head p { margin:0; color:var(--muted); line-height:1.6; font-size:13px; }
+.usage-row { display:flex; justify-content:space-between; gap:12px; margin:16px 0 10px; padding:10px 12px; border-radius:12px; background:#f8fafc; color:#475569; font-size:13px; }
+.attachment-list { display:grid; gap:8px; }
+.attachment-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; border:1px solid var(--border); border-radius:12px; padding:11px 12px; background:#fff; }
+.attachment-name { font-weight:800; overflow-wrap:anywhere; }
+.attachment-meta { font-size:12px; color:var(--muted); margin-top:3px; }
+.remove-attachment { border:1px solid #fecaca; background:#fff; color:#b91c1c; border-radius:10px; min-height:38px; padding:8px 12px; font-weight:800; }
+.empty-message { color:var(--muted); margin:10px 0 0; }
+.hidden { display:none !important; }
+@media (max-width:600px){ .section-head{display:grid;} .section-head .secondary-button{width:100%;} }
