@@ -616,7 +616,13 @@
     }
 
     if (state.inputMode === 'audio' && !state.audioBlob) {
-      throw new Error('録音モードですが、録音データがありません。');
+      if (state.attachments.length) {
+        // 録音画面から添付ファイルだけで進んだ場合は、投稿処理上は
+        // ファイルのみ投稿として扱い、音声文字起こしを要求しない。
+        state.inputMode = 'file';
+      } else {
+        throw new Error('録音または関連ファイルがありません。');
+      }
     }
 
     if (!['text', 'file', 'audio'].includes(state.inputMode)) {

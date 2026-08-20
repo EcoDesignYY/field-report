@@ -429,7 +429,7 @@
     });
     els.helpButton.addEventListener('click', () => {
       showStatus(
-        '画像は任意です。テキスト投稿では関連ファイルと画像の合計が12MiB以内になるようにしてください。',
+        '画像は任意です。関連ファイルと画像の合計が12MiB以内になるようにしてください。',
         'info'
       );
     });
@@ -530,7 +530,7 @@
 
   async function setImage(blob, fileName, mimeType, width, height) {
     if (!blob || blob.size <= 0) throw new Error('0バイトの画像は保存できません。');
-    const attachmentBytes = ['text', 'file'].includes(state.inputMode)
+    const attachmentBytes = ['text', 'file', 'audio'].includes(state.inputMode)
       ? state.attachments.reduce((sum, item) => {
           return sum + Number(
             item.size || (item.blob && item.blob.size) || 0
@@ -592,7 +592,7 @@
 
   function renderUsage() {
     const imageBytes = state.imageBlob ? state.imageBlob.size : 0;
-    const attachmentBytes = ['text', 'file'].includes(state.inputMode)
+    const attachmentBytes = ['text', 'file', 'audio'].includes(state.inputMode)
       ? state.attachments.reduce((sum, item) => {
           return sum + Number(
             item.size || (item.blob && item.blob.size) || 0
@@ -602,7 +602,7 @@
     els.imageSizeText.textContent = state.imageBlob
       ? '画像 ' + FieldReportAttachments.formatBytes(imageBytes)
       : '画像なし';
-    els.totalUsageText.textContent = ['text', 'file'].includes(state.inputMode)
+    els.totalUsageText.textContent = ['text', 'file', 'audio'].includes(state.inputMode)
       ? '投稿ファイル合計 ' +
         FieldReportAttachments.formatBytes(imageBytes + attachmentBytes) +
         ' / 12 MiB'
@@ -623,7 +623,7 @@
         });
         await putDraft('imageMeta', state.imageMeta);
       }
-      if (['text', 'file'].includes(state.inputMode)) {
+      if (['text', 'file', 'audio'].includes(state.inputMode)) {
         FieldReportAttachments.validateCollection(
           state.attachments,
           state.imageBlob ? state.imageBlob.size : 0

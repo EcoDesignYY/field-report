@@ -512,6 +512,7 @@
       setStatus(
         '録音ボタンを押すと録音を開始します。もう一度押すと停止します。\n' +
         '録音は短時間でも保存できます。2分で自動停止します。\n' +
+        '録音しない場合でも、関連ファイルが1件以上あれば次へ進めます。\n' +
         'マイク許可を求められた場合は「許可」を選択してください。',
         'info'
       );
@@ -1025,6 +1026,7 @@
     els.attachmentEmpty.classList.toggle('hidden', state.attachments.length > 0);
     els.attachmentList.innerHTML = state.attachments.map(item => '<div class="attachment-item"><div><div class="attachment-name">' + escapeHtml(item.fileName) + '</div><div class="attachment-meta">' + escapeHtml(categoryLabel(item.category)) + '・' + escapeHtml(item.extension.toUpperCase()) + '・' + escapeHtml(FieldReportAttachments.formatBytes(item.size)) + '</div></div><button type="button" class="remove-attachment" data-remove-id="' + escapeHtml(item.id) + '">削除</button></div>').join('');
     els.attachmentList.querySelectorAll('[data-remove-id]').forEach(button => button.addEventListener('click', () => removeAttachment(button.dataset.removeId)));
+    renderState();
   }
 
   function categoryLabel(category) {
@@ -1058,41 +1060,57 @@
   }
 
   async function saveAndGoNext() {
-    if (!state.audioBlob) {
-      setStatus('録音データがありません。録音してから次へ進んでください。', 'error');
+    const hasAttachments = state.attachments.length > 0;
+
+    if (!state.audioBlob && !hasAttachments) {
+      setStatus(
+        '録音または関連ファイルがありません。録音するか、関連ファイルを1件以上追加してください。',
+        'error'
+      );
       return;
     }
 
-    if (state.elapsedMs < CONFIG.MIN_RECORDING_SECONDS * 1000) {
+    if (
+      state.audioBlob &&
+      state.elapsedMs < CONFIG.MIN_RECORDING_SECONDS * 1000
+    ) {
       setStatus('録音時間が30秒未満です。30秒以上録音してから次へ進んでください。', 'warning');
       return;
     }
 
     try {
-      const mimeType = state.audioBlob.type || state.actualMimeType || state.requestedMimeType;
-      const meta = {
-        mimeType: mimeType || (PLATFORM.isIOS ? 'audio/mp4' : 'audio/webm'),
-        fileExtension: getExtensionFromMimeType(mimeType),
-        size: state.audioBlob.size,
-        durationSec: Math.max(1, Math.round(state.elapsedMs / 1000)),
-        memo: els.audioMemoInput.value.trim(),
-        savedAt: new Date().toISOString(),
-        browser: PLATFORM.browser,
-        os: PLATFORM.os
-      };
-
       const checked = FieldReportAttachments.validateCollection(
         state.attachments,
         state.imageBlob ? state.imageBlob.size : 0
       );
+
       await putDraft('inputMode', 'audio');
       await putDraft('attachments', checked.items);
-      await putDraft('audioBlob', state.audioBlob);
-      await putDraft('audioMeta', meta);
+
+      if (state.audioBlob) {
+        const mimeType = state.audioBlob.type || state.actualMimeType || state.requestedMimeType;
+        const meta = {
+          mimeType: mimeType || (PLATFORM.isIOS ? 'audio/mp4' : 'audio/webm'),
+          fileExtension: getExtensionFromMimeType(mimeType),
+          size: state.audioBlob.size,
+          durationSec: Math.max(1, Math.round(state.elapsedMs / 1000)),
+          memo: els.audioMemoInput.value.trim(),
+          savedAt: new Date().toISOString(),
+          browser: PLATFORM.browser,
+          os: PLATFORM.os
+        };
+        await putDraft('audioBlob', state.audioBlob);
+        await putDraft('audioMeta', meta);
+      } else {
+        // 過去の録音下書きが残っていると、添付のみ投稿でも確認画面で
+        // 古い録音が復元されるため明示的に削除する。
+        await deleteDraft('audioBlob');
+        await deleteDraft('audioMeta');
+      }
 
       location.href = CONFIG.NEXT_PAGE_URL;
     } catch (error) {
-      setStatus('録音データの保存に失敗しました。\n' + getErrorMessage(error), 'error');
+      setStatus('投稿データの保存に失敗しました。\n' + getErrorMessage(error), 'error');
     }
   }
 
@@ -1337,7 +1355,7 @@
     els.pauseButton.disabled = true;
     els.pauseButton.textContent = '一時停止';
     els.resetButton.disabled = true;
-    els.nextButton.disabled = true;
+    els.nextButton.disabled = state.attachments.length === 0;
   }
 
 
