@@ -1596,6 +1596,21 @@
     els.statusBox.textContent = message;
   }
 
+  function escapeHtml(value) {
+    const entities = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    };
+
+    return String(value || '').replace(
+      /[&<>'"]/g,
+      character => entities[character]
+    );
+  }
+
   function getErrorMessage(error) {
     if (!error) return '不明なエラーです。';
     if (error.message) return String(error.message);
