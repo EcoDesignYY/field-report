@@ -98,6 +98,20 @@
         </p>
       </section>
 
+      <section class="selection-card notification-mode-card">
+        <div class="selection-header">
+          <div>
+            <h2>AI解析結果の通知</h2>
+            <p>対象部署への通知タイミングを選択します。</p>
+          </div>
+        </div>
+        <label class="notification-toggle-row">
+          <input id="reviewBeforeNotifyToggle" type="checkbox">
+          <span>自分でAI解析結果を確認・修正してから対象部署へ通知する</span>
+        </label>
+        <p id="notificationModeHelp" class="selection-note">OFFの場合は、AI解析完了後にこれまでどおり自動通知します。</p>
+      </section>
+
       <section
         id="drivePermissionCard"
         class="drive-card hidden"
@@ -161,7 +175,7 @@
         <audio id="audioPlayer" preload="metadata"></audio>
 
         <div class="memo-box">
-          <div class="label">録音メモ</div>
+          <div class="label">補足事項</div>
           <div id="audioMemoText" class="memo-text">なし</div>
         </div>
       </section>
@@ -203,7 +217,7 @@
         </div>
 
         <div class="memo-box">
-          <div class="label">画像メモ</div>
+          <div class="label">補足事項</div>
           <div id="imageMemoText" class="memo-text">なし</div>
         </div>
       </section>
@@ -249,6 +263,6 @@
     </footer>
   </div>
 
-  <script src="./confirm.js?v=workflow-v164-attachment-ai"></script>
+  <script src="./confirm.js?v=workflow-v170"></script>
 </body>
 </html>
