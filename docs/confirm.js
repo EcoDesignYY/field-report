@@ -408,6 +408,7 @@
     imageBlob: null,
     imageMeta: null,
     attachments: [],
+    aiNotificationMode: 'auto',
 
     audioObjectUrl: '',
     imageObjectUrl: '',
@@ -493,6 +494,8 @@
     elements.submitterDepartment = document.getElementById('submitterDepartment');
     elements.submitterEmail = document.getElementById('submitterEmail');
     elements.targetDepartmentSelect = document.getElementById('targetDepartmentSelect');
+    elements.reviewBeforeNotifyToggle = document.getElementById('reviewBeforeNotifyToggle');
+    elements.notificationModeHelp = document.getElementById('notificationModeHelp');
 
     elements.textSummaryCard = document.getElementById('textSummaryCard');
     elements.textStatus = document.getElementById('textStatus');
@@ -539,6 +542,7 @@
     }
     elements.playAudioButton.addEventListener('click', toggleAudioPlayback);
     elements.targetDepartmentSelect.addEventListener('change', updateUploadButtonState);
+    elements.reviewBeforeNotifyToggle.addEventListener('change', updateNotificationModeUi);
 
     elements.audioPlayer.addEventListener('ended', () => {
       elements.playAudioButton.textContent = '再生';
@@ -592,6 +596,10 @@
     state.imageMeta = await getDraft('imageMeta');
     const storedAttachments = await getDraft('attachments');
     state.attachments = Array.isArray(storedAttachments) ? storedAttachments : [];
+    const storedNotificationMode = String((await getDraft('aiNotificationMode')) || '').toLowerCase();
+    state.aiNotificationMode = storedNotificationMode === 'review' ? 'review' : 'auto';
+    elements.reviewBeforeNotifyToggle.checked = state.aiNotificationMode === 'review';
+    updateNotificationModeUi();
 
     if (!state.inputMode) {
       state.inputMode = state.textBody
@@ -615,7 +623,7 @@
       throw new Error('入力方式を判定できません。入力方法選択画面からやり直してください。');
     }
 
-    if (!['text', 'file'].includes(state.inputMode)) {
+    if (!['text', 'file', 'audio'].includes(state.inputMode)) {
       state.attachments = [];
     }
 
@@ -720,7 +728,7 @@
   }
 
   function renderAttachmentSummary() {
-    if (!['text', 'file'].includes(state.inputMode) || !state.attachments.length) {
+    if (!['text', 'file', 'audio'].includes(state.inputMode) || !state.attachments.length) {
       elements.attachmentSummaryCard.classList.add('hidden');
       elements.attachmentList.innerHTML = '';
       return;
@@ -1270,6 +1278,14 @@
     updateUploadButtonState();
   }
 
+  async function updateNotificationModeUi() {
+    state.aiNotificationMode = elements.reviewBeforeNotifyToggle.checked ? 'review' : 'auto';
+    elements.notificationModeHelp.textContent = state.aiNotificationMode === 'review'
+      ? 'AI解析完了後、まず投稿者へ確認依頼を通知します。投稿者が確定するまで対象部署には通知しません。'
+      : 'AI解析完了後、これまでどおり対象部署メンバーへ自動通知します。';
+    try { await putDraft('aiNotificationMode', state.aiNotificationMode); } catch (_) {}
+  }
+
   function validateBeforeUpload() {
     if (state.inputMode === 'text' && !state.textBody) {
       showStatus('テキスト入力内容がありません。', 'error');
@@ -1293,7 +1309,7 @@
     }
     try {
       FieldReportAttachments.validateCollection(
-        ['text', 'file'].includes(state.inputMode) ? state.attachments : [],
+        ['text', 'file', 'audio'].includes(state.inputMode) ? state.attachments : [],
         state.imageBlob ? state.imageBlob.size : 0
       );
     } catch (error) {
@@ -1403,7 +1419,7 @@
   }
 
   async function uploadAttachmentFilesIfNeeded(reportId, folderId) {
-    if (!['text', 'file'].includes(state.inputMode) || !state.attachments.length) return [];
+    if (!['text', 'file', 'audio'].includes(state.inputMode) || !state.attachments.length) return [];
 
     const results = [];
     for (let index = 0; index < state.attachments.length; index += 1) {
@@ -1456,12 +1472,14 @@
       : '';
 
     return {
-      schemaVersion: 4,
+      schemaVersion: 5,
       reportId: params.reportId,
       createdAt: state.draftStartedAt || new Date().toISOString(),
       clientCreatedAt: new Date().toISOString(),
       autoTitle: params.autoTitle,
       status: 'uploaded',
+      reportVersion: 1,
+      aiNotificationMode: state.aiNotificationMode,
 
       inputMode: state.inputMode,
       input: {
