@@ -503,3 +503,9 @@ textarea {
     flex-direction: column;
   }
 }
+
+
+/* v1.7.0 AI notification mode */
+.notification-toggle-row { display:flex; gap:12px; align-items:flex-start; padding:14px; border:1px solid #dbeafe; border-radius:14px; background:#f8fbff; font-weight:800; line-height:1.5; }
+.notification-toggle-row input { width:22px; height:22px; margin-top:1px; flex:0 0 auto; }
+.selection-note { margin:10px 0 0; color:#64748b; font-size:13px; line-height:1.6; }
