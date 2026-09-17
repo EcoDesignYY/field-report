@@ -384,13 +384,13 @@
 
   const FALLBACK_DEPARTMENTS = [
     '開発営業部',
+    '技術部',
     '設計部',
     '製造部',
-    '技術部',
-    '総務部',
     '業務部',
-    '役員'
+    '総務部'
   ];
+  const ROUTING_DEPARTMENTS = FALLBACK_DEPARTMENTS.slice();
 
   const state = {
     authToken: '',
@@ -409,6 +409,7 @@
     imageMeta: null,
     attachments: [],
     aiNotificationMode: 'auto',
+    anonymousPost: false,
 
     audioObjectUrl: '',
     imageObjectUrl: '',
@@ -494,6 +495,10 @@
     elements.submitterDepartment = document.getElementById('submitterDepartment');
     elements.submitterEmail = document.getElementById('submitterEmail');
     elements.targetDepartmentSelect = document.getElementById('targetDepartmentSelect');
+    elements.jobNoInput = document.getElementById('jobNoInput');
+    elements.serialNoInput = document.getElementById('serialNoInput');
+    elements.anonymousPostToggle = document.getElementById('anonymousPostToggle');
+    elements.anonymousPostHelp = document.getElementById('anonymousPostHelp');
     elements.reviewBeforeNotifyToggle = document.getElementById('reviewBeforeNotifyToggle');
     elements.notificationModeHelp = document.getElementById('notificationModeHelp');
 
@@ -543,6 +548,7 @@
     elements.playAudioButton.addEventListener('click', toggleAudioPlayback);
     elements.targetDepartmentSelect.addEventListener('change', updateUploadButtonState);
     elements.reviewBeforeNotifyToggle.addEventListener('change', updateNotificationModeUi);
+    elements.anonymousPostToggle.addEventListener('change', updateAnonymousPostUi);
 
     elements.audioPlayer.addEventListener('ended', () => {
       elements.playAudioButton.textContent = '再生';
@@ -826,7 +832,7 @@
       new Set(
         state.departments
           .map(value => String(value || '').trim())
-          .filter(Boolean)
+          .filter(value => ROUTING_DEPARTMENTS.includes(value))
       )
     ).sort();
 
@@ -835,16 +841,14 @@
     elements.submitterEmail.textContent = submitter.email || '-';
 
     elements.targetDepartmentSelect.innerHTML = '';
-    elements.targetDepartmentSelect.appendChild(new Option('対象部署を選択', ''));
+    elements.targetDepartmentSelect.appendChild(new Option('AIに自動選択させる（推奨）', ''));
 
     departments.forEach(department => {
       elements.targetDepartmentSelect.appendChild(new Option(department, department));
     });
 
-    if (submitter.department && departments.includes(submitter.department)) {
-      elements.targetDepartmentSelect.value = submitter.department;
-    }
-
+    // v1.9.0: 初期値はAI自動選択。手動指定は任意。
+    elements.targetDepartmentSelect.value = '';
     updateUploadButtonState();
   }
 
@@ -1292,6 +1296,21 @@
     try { await putDraft('aiNotificationMode', state.aiNotificationMode); } catch (_) {}
   }
 
+  async function updateAnonymousPostUi() {
+    state.anonymousPost = Boolean(elements.anonymousPostToggle && elements.anonymousPostToggle.checked);
+    if (state.anonymousPost) {
+      elements.reviewBeforeNotifyToggle.checked = false;
+      elements.reviewBeforeNotifyToggle.disabled = true;
+      state.aiNotificationMode = 'auto';
+      elements.notificationModeHelp.textContent = '匿名投稿では投稿者名を通知に出さないため、AI解析後に対象部署へ自動通知します。';
+      elements.anonymousPostHelp.textContent = '一覧・詳細・Teams通知では投稿者を「匿名」と表示します。本人確認用の情報は内部で保持します。';
+    } else {
+      elements.reviewBeforeNotifyToggle.disabled = false;
+      elements.anonymousPostHelp.textContent = '投稿者情報は権限確認・監査のため内部では保持されます。';
+      await updateNotificationModeUi();
+    }
+  }
+
   function validateBeforeUpload() {
     if (state.inputMode === 'text' && !state.textBody) {
       showStatus('テキスト入力内容がありません。', 'error');
@@ -1307,10 +1326,6 @@
     }
     if (CONFIG.REQUIRE_IMAGE && !state.imageBlob) {
       showStatus('画像データがありません。', 'error');
-      return false;
-    }
-    if (!elements.targetDepartmentSelect.value) {
-      showStatus('対象部署を選択してください。', 'error');
       return false;
     }
     try {
@@ -1361,9 +1376,12 @@
 
   async function uploadReportCore() {
     const targetDepartment = elements.targetDepartmentSelect.value;
+    const jobNo = String(elements.jobNoInput && elements.jobNoInput.value || '').trim();
+    const serialNo = String(elements.serialNoInput && elements.serialNoInput.value || '').trim();
     const reportId = buildReportId();
-    const autoTitle = '現場投稿_' + formatTimestampForTitle(new Date()) + '_' + targetDepartment;
-    const folderName = reportId + '_' + sanitizeFileName(targetDepartment);
+    const departmentLabel = targetDepartment || 'AI自動振分';
+    const autoTitle = '現場投稿_' + formatTimestampForTitle(new Date()) + '_' + departmentLabel;
+    const folderName = reportId + '_' + sanitizeFileName(departmentLabel);
 
     const folder = await createDriveFolder(folderName, CONFIG.DRIVE_ROOT_FOLDER_ID);
     const audioFile = await uploadAudioFileIfNeeded(reportId, folder.id);
@@ -1374,6 +1392,8 @@
       reportId,
       autoTitle,
       targetDepartment,
+      jobNo,
+      serialNo,
       folder,
       audioFile,
       imageFile,
@@ -1387,6 +1407,8 @@
       reportId,
       autoTitle,
       targetDepartment,
+      jobNo,
+      serialNo,
       folder,
       audioFile,
       imageFile,
@@ -1478,14 +1500,15 @@
       : '';
 
     return {
-      schemaVersion: 5,
+      schemaVersion: 6,
       reportId: params.reportId,
       createdAt: state.draftStartedAt || new Date().toISOString(),
       clientCreatedAt: new Date().toISOString(),
       autoTitle: params.autoTitle,
       status: 'uploaded',
       reportVersion: 1,
-      aiNotificationMode: state.aiNotificationMode,
+      aiNotificationMode: state.anonymousPost ? 'auto' : state.aiNotificationMode,
+      anonymousPost: Boolean(state.anonymousPost),
 
       inputMode: state.inputMode,
       input: {
@@ -1507,7 +1530,15 @@
         employeeNo: submitter.employeeNo || submitter.no || ''
       },
 
-      targetDepartment: params.targetDepartment,
+      targetDepartment: params.targetDepartment || '',
+      targetDepartmentOverride: params.targetDepartment || '',
+      targetDepartmentMode: params.targetDepartment ? 'manual' : 'auto',
+      caseInfo: {
+        jobNo: String(params.jobNo || '').trim(),
+        serialNo: String(params.serialNo || '').trim()
+      },
+      jobNo: String(params.jobNo || '').trim(),
+      serialNo: String(params.serialNo || '').trim(),
       folder: {
         id: params.folder.id,
         name: params.folder.name,
@@ -1692,6 +1723,9 @@
       reportId: metadata.reportId,
       createdAt: metadata.createdAt,
       targetDepartment: metadata.targetDepartment,
+      jobNo: metadata.jobNo || '',
+      serialNo: metadata.serialNo || '',
+      anonymousPost: Boolean(metadata.anonymousPost),
       folderId: drive.folderId || '',
       folderUrl: drive.folderUrl || '',
       audioFileId: drive.audioFileId || '',
@@ -1851,13 +1885,11 @@
         ? state.attachments.length > 0
         : Boolean(state.textBody);
     const hasImage = Boolean(state.imageBlob);
-    const hasDepartment = Boolean(elements.targetDepartmentSelect.value);
 
     // Drive認証前でも投稿ボタンは押せるようにする。
     // ボタンのクリック操作をそのままOAuth開始のユーザー操作として利用する。
     const canUpload = !state.isUploading
       && !state.uploadResult
-      && hasDepartment
       && hasSource
       && (!CONFIG.REQUIRE_IMAGE || hasImage);
 

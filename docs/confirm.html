@@ -16,7 +16,7 @@
 
   <link
     rel="stylesheet"
-    href="./confirm.css?v=workflow-v1712"
+    href="./confirm.css?v=workflow-v190"
   >
 
   <style>
@@ -57,7 +57,7 @@
         </div>
         <h1>投稿内容を確認</h1>
         <p>
-          対象部署を選択して投稿してください。投稿ボタンを押した時点でDrive確認を行い、そのまま保存します。
+          内容を確認し、必要に応じてJOB.NO.・製番を入力して投稿してください。対象部署はAIが内容から自動選択できます。
         </p>
       </section>
 
@@ -80,22 +80,40 @@
         </div>
       </section>
 
+      <section class="form-card case-info-card">
+        <h2>関連案件情報 <span class="optional-label">任意</span></h2>
+        <div class="case-input-grid">
+          <label>
+            <span class="field-label">JOB.NO.</span>
+            <input id="jobNoInput" class="text-input" type="text" inputmode="text" autocomplete="off" maxlength="40" placeholder="例：12345">
+          </label>
+          <label>
+            <span class="field-label">製番</span>
+            <input id="serialNoInput" class="text-input" type="text" inputmode="text" autocomplete="off" maxlength="40" placeholder="例：260901">
+          </label>
+        </div>
+        <p class="help-text">
+          入力されたJOB.NO.・製番は、GAS側で案件情報を照合し、AI解析の追加情報として使用します。
+        </p>
+      </section>
+
       <section class="form-card">
-        <label
-          for="targetDepartmentSelect"
-          class="field-label"
-        >
-          対象部署
-        </label>
-        <select
-          id="targetDepartmentSelect"
-          class="select-input"
-        >
-          <option value="">部署情報を取得中...</option>
+        <label for="targetDepartmentSelect" class="field-label">対象部署</label>
+        <select id="targetDepartmentSelect" class="select-input">
+          <option value="">AIに自動選択させる（推奨）</option>
         </select>
         <p class="help-text">
-          投稿内容を確認してほしい部署を選択してください。初期値は投稿者の所属部署です。
+          未選択の場合は、投稿内容と組織図上の各部署の役割からAIが主担当部署を1部署選択します。必要な場合のみ手動で指定してください。
         </p>
+      </section>
+
+      <section class="selection-card anonymous-card">
+        <div class="selection-header"><div><h2>匿名投稿</h2><p>氏名・所属部署を一般表示しない場合に使用します。</p></div></div>
+        <label class="notification-toggle-row">
+          <input id="anonymousPostToggle" type="checkbox">
+          <span>匿名で投稿する</span>
+        </label>
+        <p id="anonymousPostHelp" class="selection-note">投稿者情報は権限確認・監査のため内部では保持されます。</p>
       </section>
 
       <section class="selection-card notification-mode-card">
@@ -263,6 +281,6 @@
     </footer>
   </div>
 
-  <script src="./confirm.js?v=workflow-v1712"></script>
+  <script src="./confirm.js?v=workflow-v190"></script>
 </body>
 </html>
