@@ -18,6 +18,18 @@
 
     const DEFINITIONS = {
       pdf:  { category: 'document', mimes: ['application/pdf'] },
+      docx: {
+        category: 'document',
+        mimes: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+      },
+      xlsx: {
+        category: 'document',
+        mimes: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+      },
+      pptx: {
+        category: 'document',
+        mimes: ['application/vnd.openxmlformats-officedocument.presentationml.presentation']
+      },
       txt:  { category: 'document', mimes: ['text/plain'] },
       html: { category: 'document', mimes: ['text/html'] },
       htm:  { category: 'document', mimes: ['text/html'] },
@@ -100,14 +112,6 @@
         category: 'audio',
         mimes: ['audio/mpeg', 'audio/mp3']
       },
-      aiff: {
-        category: 'audio',
-        mimes: ['audio/aiff', 'audio/x-aiff']
-      },
-      aif: {
-        category: 'audio',
-        mimes: ['audio/aiff', 'audio/x-aiff']
-      },
       aac: {
         category: 'audio',
         mimes: ['audio/aac', 'audio/x-aac']
@@ -125,10 +129,6 @@
       mpeg: { category: 'video', mimes: ['video/mpeg'] },
       mpg:  { category: 'video', mimes: ['video/mpeg'] },
       mov:  { category: 'video', mimes: ['video/quicktime'] },
-      avi: {
-        category: 'video',
-        mimes: ['video/x-msvideo', 'video/avi']
-      },
       flv:  { category: 'video', mimes: ['video/x-flv'] },
       webm: { category: 'video', mimes: ['video/webm'] },
       wmv:  { category: 'video', mimes: ['video/x-ms-wmv'] },
