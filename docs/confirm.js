@@ -388,7 +388,8 @@
     '設計部',
     '製造部',
     '業務部',
-    '総務部'
+    '総務部',
+    '5S'
   ];
   const ROUTING_DEPARTMENTS = FALLBACK_DEPARTMENTS.slice();
 
