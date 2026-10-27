@@ -362,7 +362,7 @@
     DB_VERSION: 1,
     STORE_NAME: 'draft',
     AUTH_TOKEN_STORAGE_KEY: 'fieldReportAuthToken',
-    MIN_RECORDING_SECONDS: 30,
+    MIN_RECORDING_SECONDS: 5,
     MAX_RECORDING_SECONDS: 120,
     NEXT_PAGE_URL: './capture.html',
     PREVIOUS_PAGE_URL: './input.html'
@@ -1074,7 +1074,7 @@
       state.audioBlob &&
       state.elapsedMs < CONFIG.MIN_RECORDING_SECONDS * 1000
     ) {
-      setStatus('録音時間が30秒未満です。30秒以上録音してから次へ進んでください。', 'warning');
+      setStatus('録音時間が5秒未満です。5秒以上録音してから次へ進んでください。', 'warning');
       return;
     }
 
@@ -1346,7 +1346,7 @@
       els.pauseButton.textContent = '一時停止';
       els.resetButton.disabled = false;
       els.nextButton.disabled = !hasMinimumDuration;
-      setRecordStatus(hasMinimumDuration ? '録音済み' : '30秒未満', hasMinimumDuration ? 'ready' : 'error');
+      setRecordStatus(hasMinimumDuration ? '録音済み' : '5秒未満', hasMinimumDuration ? 'ready' : 'error');
       return;
     }
 
