@@ -1229,7 +1229,7 @@
 
       localStorage.setItem(CONFIG.CONSENT_STORAGE_KEY, '1');
       markDriveReady();
-      showStatus('Google Driveへ投稿しています...', 'info');
+      showStatus('KAIZEN VOICEへ投稿しています...', 'info');
       uploadAfterDriveAuthorization();
     };
 
@@ -1261,7 +1261,7 @@
         resetDriveAuthorization();
         setDriveStatus('投稿時に再確認', 'info');
         showStatus(
-          'Google Driveの認証期限が切れました。もう一度「Google Driveへ投稿」を押してください。',
+          'Google Driveの認証期限が切れました。もう一度「KAIZEN VOICEへ投稿」を押してください。',
           'warning'
         );
       } else {
@@ -1903,7 +1903,7 @@
     } else if (state.uploadResult) {
       elements.uploadButton.textContent = '投稿済み';
     } else {
-      elements.uploadButton.textContent = 'Google Driveへ投稿';
+      elements.uploadButton.textContent = 'KAIZEN VOICEへ投稿';
     }
   }
 
