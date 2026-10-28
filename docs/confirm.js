@@ -885,7 +885,7 @@
     elements.drivePermissionCard.classList.add('hidden');
     setDriveStatus('投稿時にDrive確認', 'info');
     showStatus(
-      '内容を確認し、「Google Driveへ投稿」を押してください。\n' +
+      '内容を確認し、「KAIZEN VOICEへ投稿」を押してください。\n' +
       'Driveの確認後、そのまま自動で投稿します。',
       'info'
     );
